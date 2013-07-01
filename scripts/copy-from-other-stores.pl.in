@@ -9,7 +9,9 @@ my $binDir = $ENV{"NIX_BIN_DIR"} || "@bindir@";
 
 STDOUT->autoflush(1);
 
-my @remoteStoresAll = split ':', ($ENV{"NIX_OTHER_STORES"} or "");
+my $symlinkHack = ($ENV{"NIX_SYMLINK_HACK"} // "") eq "1";
+
+my @remoteStoresAll = split ':', ($ENV{"NIX_OTHER_STORES"} // "");
 
 my @remoteStores;
 foreach my $dir (@remoteStoresAll) {
@@ -74,7 +76,7 @@ if ($ARGV[0] eq "--query") {
                 print scalar @references, "\n";
                 print "$_\n" foreach @references;
                 print "0\n";
-                print "$narSize\n";
+                print $symlinkHack ? 0 : $narSize, "\n";
             }
 
             print "\n";
@@ -91,9 +93,14 @@ elsif ($ARGV[0] eq "--substitute") {
     my $destPath = $ARGV[2];
     my ($store, $sourcePath) = findStorePath $storePath;
     die unless $store;
-    print STDERR "\n*** Copying `$storePath' from `$sourcePath'\n\n";
-    system("$binDir/nix-store --dump $sourcePath | $binDir/nix-store --restore $destPath") == 0
-        or die "cannot copy `$sourcePath' to `$storePath'";
+    if ($symlinkHack) {
+        print STDERR "\n*** Linking ‘$storePath’ to ‘$sourcePath’\n\n";
+        symlink($sourcePath, $storePath) or die "cannot link ‘$storePath’ to ‘$sourcePath’: $!";
+    } else {
+        print STDERR "\n*** Copying ‘$storePath’ from ‘$sourcePath’\n\n";
+        system("$binDir/nix-store --dump $sourcePath | $binDir/nix-store --restore $destPath") == 0
+            or die "cannot copy ‘$sourcePath’ to ‘$storePath’";
+    }
     print "\n"; # no hash to verify
 }
 
