@@ -420,6 +420,7 @@ std::string filterANSIEscapes(const std::string & s,
 /* Base64 encoding/decoding. */
 string base64Encode(const string & s);
 string base64Decode(const string & s);
+bool isBase64Char(char c);
 
 
 /* Get a value for the specified key from an associate container, or a

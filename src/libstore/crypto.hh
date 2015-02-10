@@ -51,4 +51,8 @@ bool verifyDetached(const std::string & data, const std::string & sig,
 
 PublicKeys getDefaultPublicKeys();
 
+void initCrypto();
+
+[[noreturn]] void noSodium();
+
 }

@@ -1357,18 +1357,19 @@ string base64Encode(const string & s)
 }
 
 
+string reverseBase64Chars()
+{
+    string s(256, 0x40);
+    for (int i = 0; i < 64; i++)
+        s[(int) base64Chars[i]] = i;
+    return s;
+}
+
+string base64Reverse = reverseBase64Chars();
+
+
 string base64Decode(const string & s)
 {
-    bool init = false;
-    char decode[256];
-    if (!init) {
-        // FIXME: not thread-safe.
-        memset(decode, -1, sizeof(decode));
-        for (int i = 0; i < 64; i++)
-            decode[(int) base64Chars[i]] = i;
-        init = true;
-    }
-
     string res;
     unsigned int d = 0, bits = 0;
 
@@ -1376,8 +1377,8 @@ string base64Decode(const string & s)
         if (c == '=') break;
         if (c == '\n') continue;
 
-        char digit = decode[(unsigned char) c];
-        if (digit == -1)
+        char digit = base64Reverse[(unsigned char) c];
+        if (digit > 0x3f)
             throw Error("invalid character in Base64 string");
 
         bits += 6;
@@ -1389,6 +1390,12 @@ string base64Decode(const string & s)
     }
 
     return res;
+}
+
+
+bool isBase64Char(char c)
+{
+    return base64Reverse[c] <= 0x3f;
 }
 
 

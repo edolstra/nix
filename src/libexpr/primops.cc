@@ -22,6 +22,8 @@
 #include <regex>
 #include <dlfcn.h>
 
+#include <sodium.h>
+
 
 namespace nix {
 
@@ -2134,6 +2136,40 @@ static void prim_fetchTarball(EvalState & state, const Pos & pos, Value * * args
 
 
 /*************************************************************
+ * Cryptography
+ *************************************************************/
+
+
+/* Encrypt a string using a key stored in a file. */
+static void prim_encryptString(EvalState & state, const Pos & pos, Value * * args, Value & v)
+{
+    PathSet context;
+    Path path = state.coerceToPath(pos, *args[0], context);
+    if (!context.empty())
+        throw EvalError(format("string '%1%' cannot refer to other paths, at %2%") % path % pos);
+
+    // FIXME: lock/wipe the key in memory.
+    string key = base64Decode(readFile(path));
+    if (key.size() != crypto_secretbox_KEYBYTES)
+        throw Error(format("file '%1%' does not contain a key created using 'nix-store --generate-key'") % path);
+
+    string s = state.forceStringNoCtx(*args[1], pos);
+
+    /* Note: since the nonce is random, encryptString is
+       non-deterministic, which is unfortunate... */
+    string nonce(crypto_secretbox_NONCEBYTES, 0);
+    randombytes_buf((unsigned char *) nonce.data(), nonce.size());
+
+    string res(crypto_secretbox_MACBYTES + s.size(), ' ');
+    if (crypto_secretbox_easy((unsigned char *) res.data(), (unsigned char *) s.data(),
+            s.size(), (unsigned char *) nonce.data(), (unsigned char *) key.data()) != 0)
+        throw Error("encryption failed");
+
+    mkString(v, "<{|nixcrypt:" + base64Encode(nonce + res) + "|}>");
+}
+
+
+/*************************************************************
  * Primop registration
  *************************************************************/
 
@@ -2320,6 +2356,9 @@ void EvalState::createBaseEnv()
     // Networking
     addPrimOp("__fetchurl", 1, prim_fetchurl);
     addPrimOp("fetchTarball", 1, prim_fetchTarball);
+
+    // Cryptography
+    addPrimOp("__encryptString", 2, prim_encryptString);
 
     /* Add a wrapper around the derivation primop that computes the
        `drvPath' and `outPath' attributes lazily. */

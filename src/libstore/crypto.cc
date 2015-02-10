@@ -39,7 +39,7 @@ SecretKey::SecretKey(const string & s)
 }
 
 #if !HAVE_SODIUM
-[[noreturn]] static void noSodium()
+[[noreturn]] void noSodium()
 {
     throw Error("Nix was not compiled with libsodium, required for signed binary cache support");
 }
@@ -121,6 +121,14 @@ PublicKeys getDefaultPublicKeys()
     }
 
     return publicKeys;
+}
+
+void initCrypto()
+{
+#if HAVE_SODIUM
+    if (sodium_init() == -1)
+        throw Error("could not initialise libsodium");
+#endif
 }
 
 }
