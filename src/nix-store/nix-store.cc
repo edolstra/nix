@@ -1034,6 +1034,71 @@ static void opGenerateBinaryCacheKey(Strings opFlags, Strings opArgs)
 }
 
 
+static void opGenerateKey(Strings opFlags, Strings opArgs)
+{
+    if (!opFlags.empty()) throw UsageError("no flags expected");
+    if (!opArgs.empty()) throw UsageError("no arguments expected");
+
+    sodium_init();
+
+    unsigned char key[crypto_secretbox_KEYBYTES];
+    randombytes_buf(key, sizeof key);
+
+    std::cout << base64Encode(string((char *) key, crypto_secretbox_KEYBYTES)) << std::endl;
+}
+
+
+static void opDecrypt(Strings opFlags, Strings opArgs)
+{
+    if (!opFlags.empty()) throw UsageError("no flags expected");
+    if (opArgs.size() != 2) throw UsageError("two arguments expected");
+    string keyFile = opArgs.front(); opArgs.pop_front();
+    string inFile = opArgs.front();
+
+    sodium_init();
+
+    string in = readFile(inFile), out, startMarker = "<{|nixcrypt:";
+
+    for (size_t pos = 0; pos < in.size(); ) {
+        if (string(in, pos, startMarker.size()) != startMarker) {
+            out += in[pos++];
+            continue;
+        }
+
+        size_t begin = pos + startMarker.size(), end = begin;
+        for (; end < in.size() && (isBase64Char(in[end]) || in[end] == '='); end++) ;
+        if (string(in, end, 3) != "|}>") {
+            out += string(in, begin, end - begin);
+            pos = end;
+            continue;
+        }
+
+        string b64 = string(in, begin, end - begin);
+        string decoded = base64Decode(b64);
+
+        if (decoded.size() < crypto_secretbox_NONCEBYTES + crypto_secretbox_MACBYTES)
+            throw Error(format("encrypted data in ‘%1%’ lacks nonce or MAC") % inFile);
+        string nonce(decoded, 0, crypto_secretbox_NONCEBYTES);
+        string encrypted(decoded, crypto_secretbox_NONCEBYTES);
+
+        // FIXME: lock/wipe the key in memory.
+        string key = base64Decode(readFile(keyFile));
+        if (key.size() != crypto_secretbox_KEYBYTES)
+            throw Error(format("file ‘%1%’ does not contain a key created using ‘nix-store --generate-key’") % keyFile);
+
+        string decrypted(encrypted.size() - crypto_secretbox_MACBYTES, 0);
+        if (crypto_secretbox_open_easy((unsigned char *) decrypted.data(), (unsigned char *) encrypted.data(),
+                encrypted.size(), (unsigned char *) nonce.data(), (unsigned char *) key.data()) != 0)
+            throw Error(format("unable to decrypt data in ‘%1%’") % inFile);
+        out += decrypted;
+
+        pos = end + 3;
+    }
+
+    std::cout << out;
+}
+
+
 /* Scan the arguments; find the operation, set global flags, put all
    other flags in a list, and put all other arguments in another
    list. */
@@ -1104,6 +1169,10 @@ int main(int argc, char * * argv)
                 op = opServe;
             else if (*arg == "--generate-binary-cache-key")
                 op = opGenerateBinaryCacheKey;
+            else if (*arg == "--generate-key")
+                op = opGenerateKey;
+            else if (*arg == "--decrypt")
+                op = opDecrypt;
             else if (*arg == "--add-root")
                 gcRoot = absPath(getArg(*arg, arg, end));
             else if (*arg == "--indirect")
