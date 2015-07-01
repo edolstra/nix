@@ -7,6 +7,7 @@
 #include "value-to-xml.hh"
 #include "names.hh"
 #include "eval-inline.hh"
+#include "source-access.hh"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -653,9 +654,7 @@ static void prim_filterSource(EvalState & state, Value * * args, Value & v)
 
     FilterFromExpr filter(state, *args[0]);
 
-    Path dstPath = readOnlyMode
-        ? computeStorePathForPath(path, true, htSHA256, filter).first
-        : store->addToStore(path, true, htSHA256, filter);
+    Path dstPath = copySourceToStore(readOnlyMode, path, filter);
 
     mkString(v, dstPath, singleton<PathSet>(dstPath));
 }

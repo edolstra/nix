@@ -99,7 +99,7 @@ public:
 private:
     SrcToStore srcToStore; 
 
-    /* A cache from path names to parse trees. */
+    /* A cache from path names to parse trees.  !!! Leaks. */
     std::map<Path, Expr *> parseTrees;
 
     /* A cache from path names to values. */
@@ -123,7 +123,7 @@ public:
 
     /* Parse a Nix expression from the specified file.  If `path'
        refers to a directory, then "/default.nix" is appended. */
-    Expr * parseExprFromFile(Path path);
+    Expr * parseExprFromFile(const Path & path);
 
     /* Parse a Nix expression from the specified string. */
     Expr * parseExprFromString(const string & s, const Path & basePath);

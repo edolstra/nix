@@ -48,9 +48,8 @@ public:
     bool querySubstitutablePathInfo(const Path & path,
         SubstitutablePathInfo & info);
     
-    Path addToStore(const Path & srcPath,
-        bool recursive = true, HashType hashAlgo = htSHA256,
-        PathFilter & filter = defaultPathFilter);
+    Path addToStore(Dumper & dumper, const string & name,
+        bool recursive = true, HashType hashAlgo = htSHA256);
 
     Path addTextToStore(const string & name, const string & s,
         const PathSet & references);

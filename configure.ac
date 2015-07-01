@@ -294,6 +294,10 @@ if test "$gc" = yes; then
 fi
 
 
+# Look for libzip.
+PKG_CHECK_MODULES([LIBZIP], [libzip])
+
+
 # Check for the required Perl dependencies (DBI and DBD::SQLite).
 perlFlags="-I$perllibdir"
 

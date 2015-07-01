@@ -336,20 +336,18 @@ PathSet RemoteStore::queryDerivationOutputNames(const Path & path)
 }
 
 
-Path RemoteStore::addToStore(const Path & _srcPath,
-    bool recursive, HashType hashAlgo, PathFilter & filter)
+Path RemoteStore::addToStore(Dumper & dumper,
+    const string & name, bool recursive, HashType hashAlgo)
 {
     openConnection();
     
-    Path srcPath(absPath(_srcPath));
-
     writeInt(wopAddToStore, to);
-    writeString(baseNameOf(srcPath), to);
+    writeString(name, to);
     /* backwards compatibility hack */
     writeInt((hashAlgo == htSHA256 && recursive) ? 0 : 1, to);
     writeInt(recursive ? 1 : 0, to);
     writeString(printHashType(hashAlgo), to);
-    dumpPath(srcPath, to, filter);
+    dumper(to);
     processStderr();
     return readStorePath(from);
 }

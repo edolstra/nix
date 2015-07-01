@@ -1,6 +1,7 @@
 #include "store-api.hh"
 #include "globals.hh"
 #include "util.hh"
+#include "archive.hh"
 
 #include <limits.h>
 
@@ -204,14 +205,15 @@ Path makeFixedOutputPath(bool recursive,
 }
 
 
-std::pair<Path, Hash> computeStorePathForPath(const Path & srcPath,
-    bool recursive, HashType hashAlgo, PathFilter & filter)
+Path StoreAPI::maybeAddToStore(bool computeOnly, Dumper & dumper,
+    const string & name, bool recursive, HashType hashAlgo)
 {
-    HashType ht(hashAlgo);
-    Hash h = recursive ? hashPath(ht, srcPath, filter).first : hashFile(ht, srcPath);
-    string name = baseNameOf(srcPath);
-    Path dstPath = makeFixedOutputPath(recursive, hashAlgo, h, name);
-    return std::pair<Path, Hash>(dstPath, h);
+    if (computeOnly) {
+        HashSink sink(hashAlgo);
+        dumper(sink);
+        return makeFixedOutputPath(recursive, hashAlgo, sink.finish().first, name);
+    } else
+        return addToStore(dumper, name, recursive, hashAlgo);
 }
 
 
@@ -306,6 +308,15 @@ void exportPaths(StoreAPI & store, const Paths & paths,
         store.exportPath(*i, sign, sink);
     }
     writeInt(0, sink);
+}
+
+
+void PathDumper::operator () (Sink & sink)
+{
+    if (recursive)
+        dumpPath(srcPath, sink, filter);
+    else
+        throw Error("fnord1");
 }
 
 

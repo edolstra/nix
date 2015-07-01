@@ -113,8 +113,11 @@ static void opAdd(Strings opFlags, Strings opArgs)
 {
     if (!opFlags.empty()) throw UsageError("unknown flag");
 
-    for (Strings::iterator i = opArgs.begin(); i != opArgs.end(); ++i)
-        cout << format("%1%\n") % store->addToStore(*i);
+    for (Strings::iterator i = opArgs.begin(); i != opArgs.end(); ++i) {
+        Path path = absPath(*i);
+        PathDumper dumper(path, true);
+        cout << format("%1%\n") % store->addToStore(dumper, baseNameOf(path));
+    }
 }
 
 
@@ -135,8 +138,11 @@ static void opAddFixed(Strings opFlags, Strings opArgs)
     HashType hashAlgo = parseHashType(opArgs.front());
     opArgs.pop_front();
 
-    for (Strings::iterator i = opArgs.begin(); i != opArgs.end(); ++i)
-        cout << format("%1%\n") % store->addToStore(*i, recursive, hashAlgo);
+    for (Strings::iterator i = opArgs.begin(); i != opArgs.end(); ++i) {
+        Path path = absPath(*i);
+        PathDumper dumper(path, recursive);
+        cout << format("%1%\n") % store->addToStore(dumper, path, recursive, hashAlgo);
+    }
 }
 
 

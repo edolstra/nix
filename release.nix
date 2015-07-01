@@ -20,7 +20,7 @@ let
 
         buildInputs =
           [ curl bison24 flex2535 perl libxml2 libxslt w3m bzip2
-            tetex dblatex nukeReferences pkgconfig
+            tetex dblatex nukeReferences pkgconfig libzip
           ];
 
         configureFlags = ''
@@ -73,7 +73,7 @@ let
         name = "nix";
         src = tarball;
 
-        buildInputs = [ curl perl bzip2 openssl pkgconfig boehmgc ];
+        buildInputs = [ curl perl bzip2 openssl pkgconfig boehmgc libzip ];
 
         configureFlags = ''
           --disable-init-state
@@ -93,7 +93,7 @@ let
         src = tarball;
 
         buildInputs =
-          [ curl perl bzip2 openssl
+          [ curl perl bzip2 openssl pkgconfig libzip
             # These are for "make check" only:
             graphviz libxml2 libxslt
           ];

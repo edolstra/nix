@@ -1081,22 +1081,15 @@ Path LocalStore::addToStoreFromDump(const string & dump, const string & name,
 }
 
 
-Path LocalStore::addToStore(const Path & _srcPath,
-    bool recursive, HashType hashAlgo, PathFilter & filter)
+Path LocalStore::addToStore(Dumper & dumper,
+    const string & name, bool recursive, HashType hashAlgo)
 {
-    Path srcPath(absPath(_srcPath));
-    debug(format("adding `%1%' to the store") % srcPath);
-
     /* Read the whole path into memory. This is not a very scalable
-       method for very large paths, but `copyPath' is mainly used for
-       small files. */
+       method for very large paths, but ‘addToStore’ is mainly used
+       for small files. */
     StringSink sink;
-    if (recursive) 
-        dumpPath(srcPath, sink, filter);
-    else
-        sink.s = readFile(srcPath);
-
-    return addToStoreFromDump(sink.s, baseNameOf(srcPath), recursive, hashAlgo);
+    dumper(sink);
+    return addToStoreFromDump(sink.s, name, recursive, hashAlgo);
 }
 
 

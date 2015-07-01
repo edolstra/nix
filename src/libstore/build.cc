@@ -7,6 +7,7 @@
 #include "local-store.hh"
 #include "util.hh"
 #include "archive.hh"
+#include "immutable.hh"
 
 #include <map>
 #include <iostream>

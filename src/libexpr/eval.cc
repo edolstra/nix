@@ -5,6 +5,7 @@
 #include "derivations.hh"
 #include "globals.hh"
 #include "eval-inline.hh"
+#include "source-access.hh"
 
 #include <cstring>
 #include <unistd.h>
@@ -1061,9 +1062,7 @@ string EvalState::coerceToString(Value & v, PathSet & context,
         if (srcToStore[path] != "")
             dstPath = srcToStore[path];
         else {
-            dstPath = readOnlyMode
-                ? computeStorePathForPath(path).first
-                : store->addToStore(path);
+            dstPath = copySourceToStore(readOnlyMode, path);
             srcToStore[path] = dstPath;
             printMsg(lvlChatty, format("copied source `%1%' -> `%2%'")
                 % path % dstPath);

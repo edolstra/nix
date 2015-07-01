@@ -98,11 +98,16 @@ static bool parseInstallSourceOptions(Globals & globals,
 
 static bool isNixExpr(const Path & path)
 {
+#if 0
     struct stat st;
     if (stat(path.c_str(), &st) == -1)
         throw SysError(format("getting information about `%1%'") % path);
 
     return !S_ISDIR(st.st_mode) || pathExists(path + "/default.nix");
+#endif
+
+    // XXX
+    return true;
 }
 
 

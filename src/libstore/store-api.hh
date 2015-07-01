@@ -106,6 +106,27 @@ struct ValidPathInfo
 typedef list<ValidPathInfo> ValidPathInfos;
 
 
+/* Abstract functor to dump a serialisation of a path to a sink.
+   Used by addToStore(). */
+struct Dumper
+{
+    virtual ~Dumper() { }
+    virtual void operator () (Sink & sink) = 0;
+};
+
+
+struct PathDumper : Dumper
+{
+    Path srcPath;
+    bool recursive;
+    PathFilter & filter;
+    PathDumper(const Path & srcPath, bool recursive,
+        PathFilter & filter = defaultPathFilter)
+        : srcPath(srcPath), recursive(recursive), filter(filter) { }
+    void operator () (Sink & sink);
+};
+
+
 class StoreAPI 
 {
 public:
@@ -156,14 +177,19 @@ public:
        validity the resulting path.  The resulting path is returned.
        The function object `filter' can be used to exclude files (see
        libutil/archive.hh). */
-    virtual Path addToStore(const Path & srcPath,
-        bool recursive = true, HashType hashAlgo = htSHA256,
-        PathFilter & filter = defaultPathFilter) = 0;
+    virtual Path addToStore(Dumper & dumper, const string & name,
+        bool recursive = true, HashType hashAlgo = htSHA256) = 0;
 
-    /* Like addToStore, but the contents written to the output path is
-       a regular file containing the given string. */
+    /* Like addToStore(), but the contents written to the output path
+       is a regular file containing the given string. */
     virtual Path addTextToStore(const string & name, const string & s,
         const PathSet & references) = 0;
+
+    /* Like addToStore(), but if ‘computeOnly’ is set, it just returns
+       the store path that would be produced by addToStore() without
+       actually creating it. */
+    Path maybeAddToStore(bool computeOnly, Dumper & dumper,
+        const string & name, bool recursive = true, HashType hashAlgo = htSHA256);
 
     /* Export a store path, that is, create a NAR dump of the store
        path and append its references and its deriver.  Optionally, a
@@ -281,14 +307,6 @@ Path makeOutputPath(const string & id,
 Path makeFixedOutputPath(bool recursive,
     HashType hashAlgo, Hash hash, string name);
 
-
-/* This is the preparatory part of addToStore() and addToStoreFixed();
-   it computes the store path to which srcPath is to be copied.
-   Returns the store path and the cryptographic hash of the
-   contents of srcPath. */
-std::pair<Path, Hash> computeStorePathForPath(const Path & srcPath,
-    bool recursive = true, HashType hashAlgo = htSHA256,
-    PathFilter & filter = defaultPathFilter);
 
 /* Preparatory part of addTextToStore().
 

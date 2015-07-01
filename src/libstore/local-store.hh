@@ -131,9 +131,8 @@ public:
     bool querySubstitutablePathInfo(const Path & substituter,
         const Path & path, SubstitutablePathInfo & info);
     
-    Path addToStore(const Path & srcPath,
-        bool recursive = true, HashType hashAlgo = htSHA256,
-        PathFilter & filter = defaultPathFilter);
+    Path addToStore(Dumper & dumper, const string & name,
+        bool recursive = true, HashType hashAlgo = htSHA256);
 
     /* Like addToStore(), but the contents of the path are contained
        in `dump', which is either a NAR serialisation (if recursive ==

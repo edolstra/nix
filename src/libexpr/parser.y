@@ -15,7 +15,6 @@
 #define BISON_HEADER
     
 #include "util.hh"
-    
 #include "nixexpr.hh"
 #include "eval.hh"
 
@@ -463,6 +462,8 @@ formal
 
 #include <eval.hh>
 
+#include "source-access.hh"
+
 
 namespace nix {
       
@@ -492,10 +493,11 @@ Expr * EvalState::parse(const char * text,
 }
 
 
-Expr * EvalState::parseExprFromFile(Path path)
+Expr * EvalState::parseExprFromFile(const Path & path)
 {
     assert(path[0] == '/');
 
+#if 0
     /* If `path' is a symlink, follow it.  This is so that relative
        path references work. */
     struct stat st;
@@ -509,13 +511,18 @@ Expr * EvalState::parseExprFromFile(Path path)
     /* If `path' refers to a directory, append `/default.nix'. */
     if (S_ISDIR(st.st_mode))
         path = canonPath(path + "/default.nix");
+#endif
 
     /* Read and parse the input file, unless it's already in the parse
        tree cache. */
     Expr * e = parseTrees[path];
     if (!e) {
-        e = parse(readFile(path).c_str(), path, dirOf(path));
+        Path pathResolved = path;
+        string source = readSourceFile(pathResolved);
+        //printMsg(lvlError, format("%1% -> %2%") % path % pathResolved);
+        e = parse(source.c_str(), pathResolved, dirOf(pathResolved));
         parseTrees[path] = e;
+        if (path != pathResolved) parseTrees[pathResolved] = e;
     }
 
     return e;

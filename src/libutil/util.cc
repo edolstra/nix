@@ -214,12 +214,12 @@ string readFile(int fd)
     struct stat st;
     if (fstat(fd, &st) == -1)
         throw SysError("statting file");
-    
-    unsigned char * buf = new unsigned char[st.st_size];
-    AutoDeleteArray<unsigned char> d(buf);
-    readFull(fd, buf, st.st_size);
 
-    return string((char *) buf, st.st_size);
+    string s(st.st_size, 0);
+    /* Strictly speaking, the C++ standard doesn't allow us to write
+       to s.data().  But it's cheaper than making a copy. */
+    readFull(fd, (unsigned char *) s.data(), st.st_size);
+    return s;
 }
 
 
