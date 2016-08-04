@@ -661,7 +661,8 @@ static void prim_derivationStrict(EvalState & state, const Pos & pos, Value * * 
     /* Optimisation, but required in read-only mode! because in that
        case we don't actually write store derivations, so we can't
        read them later. */
-    drvHashes[drvPath] = hashDerivationModulo(*state.store, drv);
+    Hash h = hashDerivationModulo(*state.store, drv);
+    (*drvHashes_.lock())[drvPath] = h;
 
     state.mkAttrs(v, 1 + drv.outputs.size());
     mkString(*state.allocAttr(v, state.sDrvPath), drvPath, {"=" + drvPath});

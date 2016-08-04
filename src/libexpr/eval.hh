@@ -37,8 +37,8 @@ struct Env
 {
     Env * up;
     unsigned short size; // used by ‘valueSize’
-    unsigned short prevWith:15; // nr of levels up to next `with' environment
-    unsigned short haveWithAttrs:1;
+    unsigned short prevWith; // nr of levels up to next `with' environment
+    std::atomic<Expr *> withAttrs;
     Value * values[0];
 };
 
@@ -87,7 +87,7 @@ public:
     const ref<Store> store;
 
 private:
-    SrcToStore srcToStore;
+    Sync<SrcToStore> srcToStore_;
 
     /* A cache from path names to values. */
 #if HAVE_BOEHMGC
@@ -95,7 +95,7 @@ private:
 #else
     typedef std::map<Path, Value> FileEvalCache;
 #endif
-    FileEvalCache fileEvalCache;
+    Sync<FileEvalCache> fileEvalCache_;
 
     SearchPath searchPath;
 

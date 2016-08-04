@@ -319,7 +319,7 @@ EvalState::EvalState(const Strings & _searchPath, ref<Store> store)
 
 EvalState::~EvalState()
 {
-    fileEvalCache.clear();
+    //fileEvalCache.clear();
 }
 
 
@@ -489,12 +489,13 @@ inline Value * EvalState::lookupVar(Env * env, const ExprVar & var, bool noEval)
     if (!var.fromWith) return env->values[var.displ];
 
     while (1) {
-        if (!env->haveWithAttrs) {
+        Expr * withAttrs = env->withAttrs;
+        if (withAttrs) {
             if (noEval) return 0;
             Value * v = allocValue();
-            evalAttrs(*env->up, (Expr *) env->values[0], *v);
+            evalAttrs(*env->up, withAttrs, *v);
             env->values[0] = v;
-            env->haveWithAttrs = true;
+            env->withAttrs = 0; // XXX
         }
         Bindings::iterator j = env->values[0]->attrs->find(var.name);
         if (j != env->values[0]->attrs->end()) {
@@ -629,16 +630,24 @@ Value * ExprPath::maybeThunk(EvalState & state, Env & env)
 
 void EvalState::evalFile(const Path & path, Value & v)
 {
-    FileEvalCache::iterator i;
-    if ((i = fileEvalCache.find(path)) != fileEvalCache.end()) {
-        v = i->second;
-        return;
+    {
+        auto fileEvalCache(fileEvalCache_.lock());
+        FileEvalCache::iterator i;
+        if ((i = fileEvalCache->find(path)) != fileEvalCache->end()) {
+            v = i->second;
+            return;
+        }
     }
 
     Path path2 = resolveExprPath(path);
-    if ((i = fileEvalCache.find(path2)) != fileEvalCache.end()) {
-        v = i->second;
-        return;
+
+    {
+        auto fileEvalCache(fileEvalCache_.lock());
+        FileEvalCache::iterator i;
+        if ((i = fileEvalCache->find(path2)) != fileEvalCache->end()) {
+            v = i->second;
+            return;
+        }
     }
 
     Activity act(*logger, lvlTalkative, format("evaluating file ‘%1%’") % path2);
@@ -650,14 +659,18 @@ void EvalState::evalFile(const Path & path, Value & v)
         throw;
     }
 
-    fileEvalCache[path2] = v;
-    if (path != path2) fileEvalCache[path] = v;
+    {
+        auto fileEvalCache(fileEvalCache_.lock());
+        (*fileEvalCache)[path2] = v;
+        if (path != path2) (*fileEvalCache)[path] = v;
+    }
 }
 
 
 void EvalState::resetFileCache()
 {
-    fileEvalCache.clear();
+    abort();
+    //fileEvalCache.clear();
 }
 
 
@@ -1118,8 +1131,7 @@ void ExprWith::eval(EvalState & state, Env & env, Value & v)
     Env & env2(state.allocEnv(1));
     env2.up = &env;
     env2.prevWith = prevWith;
-    env2.haveWithAttrs = false;
-    env2.values[0] = (Value *) attrs;
+    env2.withAttrs = attrs;
 
     body->eval(state, env2, v);
 }
@@ -1512,14 +1524,17 @@ string EvalState::copyPathToStore(PathSet & context, const Path & path)
     if (nix::isDerivation(path))
         throwEvalError("file names are not allowed to end in ‘%1%’", drvExtension);
 
+    auto srcToStore(srcToStore_.lock());
+
     Path dstPath;
-    if (srcToStore[path] != "")
-        dstPath = srcToStore[path];
+    auto i = srcToStore->find(path);
+    if (i != srcToStore->end())
+        dstPath = i->second;
     else {
         dstPath = settings.readOnlyMode
             ? store->computeStorePathForPath(checkSourcePath(path)).first
             : store->addToStore(baseNameOf(path), checkSourcePath(path), true, htSHA256, defaultPathFilter, repair);
-        srcToStore[path] = dstPath;
+        (*srcToStore)[path] = dstPath;
         printMsg(lvlChatty, format("copied source ‘%1%’ -> ‘%2%’")
             % path % dstPath);
     }

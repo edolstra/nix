@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "symbol-table.hh"
 
 namespace nix {
@@ -89,7 +91,7 @@ std::ostream & operator << (std::ostream & str, const ExternalValueBase & v);
 
 struct Value
 {
-    ValueType type;
+    std::atomic<ValueType> type{tNull};
     union
     {
         NixInt integer;
@@ -145,6 +147,25 @@ struct Value
         ExternalValueBase * external;
         NixFloat fpoint;
     };
+
+    Value()
+    {
+    }
+
+    Value(const Value & v)
+    {
+        app.left = v.app.left;
+        app.right = v.app.right;
+        type.store(v.type);
+    }
+
+    Value & operator =(const Value & v)
+    {
+        app.left = v.app.left;
+        app.right = v.app.right;
+        type.store(v.type);
+        return *this;
+    }
 
     bool isList() const
     {

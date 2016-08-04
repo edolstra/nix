@@ -265,7 +265,7 @@ bool BasicDerivation::isFixedOutput() const
 }
 
 
-DrvHashes drvHashes;
+Sync<DrvHashes> drvHashes_;
 
 
 /* Returns the hash of a derivation modulo fixed-output
@@ -303,12 +303,13 @@ Hash hashDerivationModulo(Store & store, Derivation drv)
        calls to this function.*/
     DerivationInputs inputs2;
     for (auto & i : drv.inputDrvs) {
-        Hash h = drvHashes[i.first];
+        // FIXME: should lock across transaction?
+        Hash h = (*drvHashes_.lock())[i.first];
         if (!h) {
             assert(store.isValidPath(i.first));
             Derivation drv2 = readDerivation(i.first);
             h = hashDerivationModulo(store, drv2);
-            drvHashes[i.first] = h;
+            (*drvHashes_.lock())[i.first] = h;
         }
         inputs2[printHash(h)] = i.second;
     }

@@ -2,6 +2,7 @@
 
 #include "types.hh"
 #include "hash.hh"
+#include "sync.hh"
 
 #include <map>
 
@@ -99,7 +100,7 @@ Hash hashDerivationModulo(Store & store, Derivation drv);
 /* Memoisation of hashDerivationModulo(). */
 typedef std::map<Path, Hash> DrvHashes;
 
-extern DrvHashes drvHashes; // FIXME: global, not thread-safe
+extern Sync<DrvHashes> drvHashes_;
 
 /* Split a string specifying a derivation and a set of outputs
    (/nix/store/hash-foo!out1,out2,...) into the derivation path and

@@ -26,24 +26,52 @@ LocalNoInlineNoReturn(void throwTypeError(const char * s, const Value & v, const
 
 void EvalState::forceValue(Value & v, const Pos & pos)
 {
+ restart:
     if (v.type == tThunk) {
-        Env * env = v.thunk.env;
-        Expr * expr = v.thunk.expr;
+        ValueType t = tThunk;
+        if (!v.type.compare_exchange_strong(t, tBlackhole)) {
+            //printMsg(lvlError, format("RESTART %d") % t);
+            goto restart;
+        }
         try {
-            v.type = tBlackhole;
-            //checkInterrupt();
-            expr->eval(*this, *env, v);
-        } catch (Error & e) {
-            v.type = tThunk;
-            v.thunk.env = env;
-            v.thunk.expr = expr;
+            Value vTmp;
+            v.thunk.expr->eval(*this, *v.thunk.env, vTmp);
+            assert(v.type == tBlackhole);
+            v = vTmp;
+        } catch (...) {
+            ValueType t2 = tBlackhole;
+            if (!v.type.compare_exchange_strong(t2, tThunk)) {
+                abort();
+            }
             throw;
         }
+        assert(v.type != tBlackhole && v.type != tThunk);
     }
-    else if (v.type == tApp)
-        callFunction(*v.app.left, *v.app.right, v, noPos);
-    else if (v.type == tBlackhole)
-        throwEvalError("infinite recursion encountered, at %1%", pos);
+    else if (v.type == tApp) {
+        ValueType t = tApp;
+        if (!v.type.compare_exchange_strong(t, tBlackhole)) {
+            goto restart;
+        }
+        try {
+            Value vTmp;
+            callFunction(*v.app.left, *v.app.right, vTmp, noPos);
+            assert(v.type == tBlackhole);
+            v = vTmp;
+        } catch (...) {
+            ValueType t2 = tBlackhole;
+            if (!v.type.compare_exchange_strong(t2, tApp)) {
+                abort();
+            }
+            throw;
+        }
+        //assert(v.type != tBlackhole && v.type != tApp);
+    }
+    else if (v.type == tBlackhole) {
+        //throwEvalError("infinite recursion encountered, at %1%", pos);
+        while (v.type == tBlackhole)
+            checkInterrupt();
+        if (v.type == tThunk) goto restart;
+    }
 }
 
 
