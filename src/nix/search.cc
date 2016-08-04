@@ -75,10 +75,16 @@ struct CmdSearch : StoreCommand, MixDryRun
                         if (j == v->attrs->end() || !state.forceBool(*j->value)) return;
                     }
 
-                    for (auto & i : *v->attrs) {
-                        pool.enqueue(std::bind(doExpr, i.value,
+                    std::vector<ThreadPool::work_t> work;
+
+                    for (auto & i : *v->attrs)
+                        work.emplace_back(std::bind(doExpr, i.value,
                                 attrPath == "" ? (std::string) i.name : attrPath + "." + (std::string) i.name));
-                    }
+
+                    std::random_shuffle(work.begin(), work.end());
+
+                    for (auto & i : work)
+                        pool.enqueue(i);
                 }
 
             } catch (AssertionError & e) {
