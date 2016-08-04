@@ -68,8 +68,10 @@ void EvalState::forceValue(Value & v, const Pos & pos)
     }
     else if (v.type == tBlackhole) {
         //throwEvalError("infinite recursion encountered, at %1%", pos);
-        while (v.type == tBlackhole)
-            checkInterrupt();
+        while (v.type == tBlackhole) {
+            struct timespec ts = { 0, 1000 };
+            nanosleep(&ts, 0);
+        }
         if (v.type == tThunk) goto restart;
     }
 }
