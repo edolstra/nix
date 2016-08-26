@@ -503,7 +503,7 @@ void LocalStore::checkDerivationOutputs(const Path & drvPath, const Derivation &
             drvCopy.env[i.first] = "";
         }
 
-        Hash h = hashDerivationModulo(*this, drvCopy);
+        Hash h = hashDerivationModulo(drvCopy);
 
         for (auto & i : drv.outputs) {
             Path outPath = makeOutputPath(i.first, h, drvName);

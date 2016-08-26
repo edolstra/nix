@@ -265,9 +265,6 @@ bool BasicDerivation::isFixedOutput() const
 }
 
 
-DrvHashes drvHashes;
-
-
 /* Returns the hash of a derivation modulo fixed-output
    subderivations.  A fixed-output derivation is a derivation with one
    output (`out') for which an expected hash and hash algorithm are
@@ -288,7 +285,7 @@ DrvHashes drvHashes;
    paths have been replaced by the result of a recursive call to this
    function, and that for fixed-output derivations we return a hash of
    its output path. */
-Hash hashDerivationModulo(Store & store, Derivation drv)
+Hash Store::hashDerivationModulo(Derivation drv)
 {
     /* Return a fixed hash for fixed-output derivations. */
     if (drv.isFixedOutput()) {
@@ -303,18 +300,38 @@ Hash hashDerivationModulo(Store & store, Derivation drv)
        calls to this function.*/
     DerivationInputs inputs2;
     for (auto & i : drv.inputDrvs) {
-        Hash h = drvHashes[i.first];
+        Hash h;
+        {
+            auto drvHashes(drvHashes_.lock());
+            auto j = drvHashes->find(i.first);
+            if (j != drvHashes->end()) h = j->second;
+        }
         if (!h) {
-            assert(store.isValidPath(i.first));
+            assert(isValidPath(i.first));
             Derivation drv2 = readDerivation(i.first);
-            h = hashDerivationModulo(store, drv2);
-            drvHashes[i.first] = h;
+            h = hashDerivationModulo(drv2);
+            drvHashes_.lock()->emplace(i.first, h);
         }
         inputs2[printHash(h)] = i.second;
     }
     drv.inputDrvs = inputs2;
 
     return hashString(htSHA256, drv.unparse());
+}
+
+
+Hash Store::hashDerivationModulo(const Path & drvPath, Derivation drv)
+{
+    auto hash = hashDerivationModulo(drv);
+    {
+        auto drvHashes(drvHashes_.lock());
+        auto i = drvHashes->find(drvPath);
+        if (i != drvHashes->end())
+            assert(i->second == hash);
+        else
+            drvHashes->emplace(drvPath, hash);
+    }
+    return hash;
 }
 
 

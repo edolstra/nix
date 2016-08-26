@@ -642,7 +642,7 @@ static void prim_derivationStrict(EvalState & state, const Pos & pos, Value * * 
 
         /* Use the masked derivation expression to compute the output
            path. */
-        Hash h = hashDerivationModulo(*state.store, drv);
+        Hash h = state.store->hashDerivationModulo(drv);
 
         for (auto & i : drv.outputs)
             if (i.second.path == "") {
@@ -661,7 +661,7 @@ static void prim_derivationStrict(EvalState & state, const Pos & pos, Value * * 
     /* Optimisation, but required in read-only mode! because in that
        case we don't actually write store derivations, so we can't
        read them later. */
-    drvHashes[drvPath] = hashDerivationModulo(*state.store, drv);
+    state.store->hashDerivationModulo(drvPath, drv);
 
     state.mkAttrs(v, 1 + drv.outputs.size());
     mkString(*state.allocAttr(v, state.sDrvPath), drvPath, {"=" + drvPath});

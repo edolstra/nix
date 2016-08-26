@@ -94,13 +94,6 @@ Derivation readDerivation(const Path & drvPath);
    derivations. */
 bool isDerivation(const string & fileName);
 
-Hash hashDerivationModulo(Store & store, Derivation drv);
-
-/* Memoisation of hashDerivationModulo(). */
-typedef std::map<Path, Hash> DrvHashes;
-
-extern DrvHashes drvHashes; // FIXME: global, not thread-safe
-
 /* Split a string specifying a derivation and a set of outputs
    (/nix/store/hash-foo!out1,out2,...) into the derivation path and
    the outputs. */

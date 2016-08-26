@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 
 namespace nix {
@@ -228,6 +229,10 @@ protected:
     Sync<State> state;
 
     std::shared_ptr<NarInfoDiskCache> diskCache;
+
+    /* Memoisation of hashDerivationModulo(). */
+    typedef std::unordered_map<Path, Hash> DrvHashes;
+    Sync<DrvHashes> drvHashes_;
 
     Store(const Params & params);
 
@@ -517,6 +522,10 @@ public:
     };
 
     const Stats & getStats();
+
+    Hash hashDerivationModulo(Derivation drv);
+
+    Hash hashDerivationModulo(const Path & drvPath, Derivation drv);
 
 protected:
 
