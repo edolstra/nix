@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "types.hh"
+#include "sync.hh"
 
 namespace nix {
 
@@ -62,18 +63,20 @@ class SymbolTable
 {
 private:
     typedef std::unordered_set<string> Symbols;
-    Symbols symbols;
+    mutable Sync<Symbols> symbols_;
 
 public:
     Symbol create(const string & s)
     {
-        std::pair<Symbols::iterator, bool> res = symbols.insert(s);
+        auto symbols(symbols_.lock());
+        std::pair<Symbols::iterator, bool> res = symbols->insert(s);
         return Symbol(&*res.first);
     }
 
     unsigned int size() const
     {
-        return symbols.size();
+        auto symbols(symbols_.lock());
+        return symbols->size();
     }
 
     size_t totalSize() const;
