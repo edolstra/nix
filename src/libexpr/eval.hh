@@ -88,7 +88,7 @@ public:
     const ref<Store> store;
 
 private:
-    SrcToStore srcToStore;
+    Sync<SrcToStore> srcToStore_;
 
     /* A cache from path names to values. */
 #if HAVE_BOEHMGC
@@ -96,7 +96,7 @@ private:
 #else
     typedef std::map<Path, Value> FileEvalCache;
 #endif
-    FileEvalCache fileEvalCache;
+    Sync<FileEvalCache> fileEvalCache_;
 
     SearchPath searchPath;
 

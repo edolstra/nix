@@ -321,7 +321,7 @@ EvalState::EvalState(const Strings & _searchPath, ref<Store> store)
 
 EvalState::~EvalState()
 {
-    fileEvalCache.clear();
+    //fileEvalCache.clear();
 }
 
 
@@ -632,16 +632,24 @@ Value * ExprPath::maybeThunk(EvalState & state, Env & env)
 
 void EvalState::evalFile(const Path & path, Value & v)
 {
-    FileEvalCache::iterator i;
-    if ((i = fileEvalCache.find(path)) != fileEvalCache.end()) {
-        v = i->second;
-        return;
+    {
+        auto fileEvalCache(fileEvalCache_.lock());
+        FileEvalCache::iterator i;
+        if ((i = fileEvalCache->find(path)) != fileEvalCache->end()) {
+            v = i->second;
+            return;
+        }
     }
 
     Path path2 = resolveExprPath(path);
-    if ((i = fileEvalCache.find(path2)) != fileEvalCache.end()) {
-        v = i->second;
-        return;
+
+    {
+        auto fileEvalCache(fileEvalCache_.lock());
+        FileEvalCache::iterator i;
+        if ((i = fileEvalCache->find(path2)) != fileEvalCache->end()) {
+            v = i->second;
+            return;
+        }
     }
 
     Activity act(*logger, lvlTalkative, format("evaluating file ‘%1%’") % path2);
@@ -653,14 +661,18 @@ void EvalState::evalFile(const Path & path, Value & v)
         throw;
     }
 
-    fileEvalCache[path2] = v;
-    if (path != path2) fileEvalCache[path] = v;
+    {
+        auto fileEvalCache(fileEvalCache_.lock());
+        (*fileEvalCache)[path2] = v;
+        if (path != path2) (*fileEvalCache)[path] = v;
+    }
 }
 
 
 void EvalState::resetFileCache()
 {
-    fileEvalCache.clear();
+    abort();
+    //fileEvalCache.clear();
 }
 
 
@@ -1522,14 +1534,17 @@ string EvalState::copyPathToStore(PathSet & context, const Path & path)
     if (nix::isDerivation(path))
         throwEvalError("file names are not allowed to end in ‘%1%’", drvExtension);
 
+    auto srcToStore(srcToStore_.lock());
+
     Path dstPath;
-    if (srcToStore[path] != "")
-        dstPath = srcToStore[path];
+    auto i = srcToStore->find(path);
+    if (i != srcToStore->end())
+        dstPath = i->second;
     else {
         dstPath = settings.readOnlyMode
             ? store->computeStorePathForPath(checkSourcePath(path)).first
             : store->addToStore(baseNameOf(path), checkSourcePath(path), true, htSHA256, defaultPathFilter, repair);
-        srcToStore[path] = dstPath;
+        (*srcToStore)[path] = dstPath;
         printMsg(lvlChatty, format("copied source ‘%1%’ -> ‘%2%’")
             % path % dstPath);
     }
