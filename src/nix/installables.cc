@@ -11,6 +11,8 @@ namespace nix {
 
 Value * MixInstallables::buildSourceExpr(EvalState & state)
 {
+    sToplevel = state.symbols.create("_toplevel");
+
     Value * vRoot = state.allocValue();
 
     if (file != "") {
@@ -24,7 +26,9 @@ Value * MixInstallables::buildSourceExpr(EvalState & state)
 
         auto searchPath = state.getSearchPath();
 
-        state.mkAttrs(*vRoot, searchPath.size());
+        state.mkAttrs(*vRoot, searchPath.size() + 1);
+
+        mkBool(*state.allocAttr(*vRoot, sToplevel), true);
 
         std::unordered_set<std::string> seen;
 
@@ -32,10 +36,13 @@ Value * MixInstallables::buildSourceExpr(EvalState & state)
             if (i.first == "") continue;
             if (seen.count(i.first)) continue;
             seen.insert(i.first);
-            if (!pathExists(i.second)) continue;
+
+            auto path = resolveExprPath(i.second);
+            if (!pathExists(path)) continue;
+
             mkApp(*state.allocAttr(*vRoot, state.symbols.create(i.first)),
                 state.getBuiltin("import"),
-                mkString(*state.allocValue(), i.second));
+                mkString(*state.allocValue(), path));
         }
 
         vRoot->attrs->sort();

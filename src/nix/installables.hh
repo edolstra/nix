@@ -1,6 +1,7 @@
 #pragma once
 
 #include "args.hh"
+#include "symbol-table.hh"
 
 namespace nix {
 
@@ -28,6 +29,7 @@ struct MixInstallables : virtual Args
 {
     Strings installables;
     Path file;
+    Symbol sToplevel;
 
     MixInstallables()
     {
