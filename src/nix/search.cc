@@ -100,6 +100,8 @@ struct CmdSearch : StoreCommand, MixInstallables
         pool.enqueue(std::bind(doExpr, buildSourceExpr(state), "", true));
 
         pool.process();
+
+        state.printStats();
     }
 };
 

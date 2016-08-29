@@ -1679,6 +1679,7 @@ void EvalState::printStats()
     printMsg(v, format("  number of primop calls: %1%") % nrPrimOpCalls);
     printMsg(v, format("  number of function calls: %1%") % nrFunctionCalls);
     printMsg(v, format("  total allocations: %1% bytes") % (bEnvs + bLists + bValues + bAttrsets));
+    printMsg(v, format("  number of derivations: %1%") % nrDerivations);
 
 #if HAVE_BOEHMGC
     GC_word heapSize, totalBytes;

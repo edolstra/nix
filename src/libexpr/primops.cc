@@ -454,9 +454,11 @@ void prim_valueSize(EvalState & state, const Pos & pos, Value * * args, Value & 
    derivation; `drvPath' containing the path of the Nix expression;
    and `type' set to `derivation' to indicate that this is a
    derivation. */
-static void prim_derivationStrict(EvalState & state, const Pos & pos, Value * * args, Value & v)
+void prim_derivationStrict(EvalState & state, const Pos & pos, Value * * args, Value & v)
 {
     Activity act(*logger, lvlVomit, "evaluating derivation");
+
+    state.nrDerivations++;
 
     state.forceAttrs(*args[0], pos);
 

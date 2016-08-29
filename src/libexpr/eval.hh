@@ -268,6 +268,7 @@ private:
     unsigned long nrListConcats = 0;
     unsigned long nrPrimOpCalls = 0;
     unsigned long nrFunctionCalls = 0;
+    unsigned long nrDerivations = 0;
 
     bool countCalls;
 
@@ -286,6 +287,7 @@ private:
     friend struct ExprOpConcatLists;
     friend struct ExprSelect;
     friend void prim_getAttr(EvalState & state, const Pos & pos, Value * * args, Value & v);
+    friend void prim_derivationStrict(EvalState & state, const Pos & pos, Value * * args, Value & v);
 };
 
 
