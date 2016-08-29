@@ -1231,8 +1231,9 @@ static void elemAt(EvalState & state, const Pos & pos, Value & list, int n, Valu
     state.forceList(list, pos);
     if (n < 0 || (unsigned int) n >= list.listSize())
         throw Error(format("list index %1% is out of bounds, at %2%") % n % pos);
-    state.forceValue(*list.listElems()[n]);
-    v = *list.listElems()[n];
+    auto & v2 = *list.listElems()[n];
+    state.forceValue(v2);
+    v = v2;
 }
 
 
@@ -1425,7 +1426,6 @@ static void prim_sort(EvalState & state, const Pos & pos, Value * * args, Value 
         state.forceValue(*args[1]->listElems()[n]);
         v.listElems()[n] = args[1]->listElems()[n];
     }
-
 
     auto comparator = [&](Value * a, Value * b) {
         /* Optimization: if the comparator is lessThan, bypass

@@ -90,7 +90,21 @@ std::ostream & operator << (std::ostream & str, const ExternalValueBase & v);
 
 struct Value
 {
+    // FIXME: should be std::atomic, with readers using
+    // memory_order_relaxed and writers using memory_order_release.
     ValueType type;
+
+    union
+    {
+        struct {
+            Env * env;
+            Expr * expr;
+        } thunk;
+        struct {
+            Value * left, * right;
+        } app;
+    };
+
     union
     {
         NixInt integer;
@@ -130,13 +144,6 @@ struct Value
         Value * smallList[2];
         struct {
             Env * env;
-            Expr * expr;
-        } thunk;
-        struct {
-            Value * left, * right;
-        } app;
-        struct {
-            Env * env;
             ExprLambda * fun;
         } lambda;
         PrimOp * primOp;
@@ -146,6 +153,20 @@ struct Value
         ExternalValueBase * external;
         NixFloat fpoint;
     };
+
+    Value()
+    {
+    }
+
+    Value(const Value & v) = delete;
+
+    Value & operator = (const Value & v)
+    {
+        lambda.env = v.lambda.env;
+        lambda.fun = v.lambda.fun;
+        type = v.type; // FIXME: memory_order_release
+        return *this;
+    }
 
     bool isList() const
     {
@@ -173,7 +194,7 @@ struct Value
    Value to ensure that the target isn't kept alive unnecessarily. */
 static inline void clearValue(Value & v)
 {
-    v.app.left = v.app.right = 0;
+    //v.app.left = v.app.right = 0;
 }
 
 

@@ -492,12 +492,13 @@ inline Value * EvalState::lookupVar(Env * env, const ExprVar & var, bool noEval)
     if (!var.fromWith) return env->values[var.displ];
 
     while (1) {
-        if (!env->haveWithAttrs) {
+        Expr * withAttrs = env->withAttrs;
+        if (withAttrs) {
             if (noEval) return 0;
             Value * v = allocValue();
-            evalAttrs(*env->up, (Expr *) env->values[0], *v);
+            evalAttrs(*env->up, withAttrs, *v);
             env->values[0] = v;
-            env->haveWithAttrs = true;
+            env->withAttrs = 0;
         }
         Bindings::iterator j = env->values[0]->attrs->find(var.name);
         if (j != env->values[0]->attrs->end()) {
@@ -906,7 +907,7 @@ void ExprSelect::eval(EvalState & state, Env & env, Value & v)
             if (state.countCalls && pos2) state.attrSelects[*pos2]++;
         }
 
-        state.forceValue(*vAttrs, ( pos2 != NULL ? *pos2 : this->pos ) );
+        state.forceValue(*vAttrs, pos2 ? *pos2 : this->pos);
 
     } catch (Error & e) {
         if (pos2 && pos2->file != state.sDerivationNix)
@@ -928,6 +929,7 @@ void ExprOpHasAttr::eval(EvalState & state, Env & env, Value & v)
 
     for (auto & i : attrPath) {
         state.forceValue(*vAttrs);
+        assert(vAttrs->type != tAttrs || vAttrs->attrs != 0);
         Bindings::iterator j;
         Symbol name = getName(i, state, env);
         if (vAttrs->type != tAttrs ||
@@ -1140,8 +1142,7 @@ void ExprWith::eval(EvalState & state, Env & env, Value & v)
     Env & env2(state.allocEnv(1));
     env2.up = &env;
     env2.prevWith = prevWith;
-    env2.haveWithAttrs = false;
-    env2.values[0] = (Value *) attrs;
+    env2.withAttrs = attrs;
 
     body->eval(state, env2, v);
 }
@@ -1416,12 +1417,8 @@ void EvalState::forceFunction(Value & v, const Pos & pos)
 string EvalState::forceString(Value & v, const Pos & pos)
 {
     forceValue(v, pos);
-    if (v.type != tString) {
-        if (pos)
-            throwTypeError("value is %1% while a string was expected, at %2%", v, pos);
-        else
-            throwTypeError("value is %1% while a string was expected", v);
-    }
+    if (v.type != tString)
+        throwTypeError("value is %1% while a string was expected, at %2%", v, pos);
     return string(v.string.s);
 }
 
