@@ -1792,6 +1792,8 @@ void EvalState::printStats()
         topObj.attr("nrLookups", nrLookups);
         topObj.attr("nrPrimOpCalls", nrPrimOpCalls);
         topObj.attr("nrFunctionCalls", nrFunctionCalls);
+        topObj.attr("nrMemoiseHits", nrMemoiseHits);
+        topObj.attr("nrMemoiseMisses", nrMemoiseMisses);
 #if HAVE_BOEHMGC
         {
             auto gc = topObj.object("gc");
