@@ -85,9 +85,9 @@ struct Expr
 std::ostream & operator << (std::ostream & str, const Expr & e);
 
 #define COMMON_METHODS \
-    void show(std::ostream & str) const; \
-    void eval(EvalState & state, Env & env, Value & v); \
-    void bindVars(const StaticEnv & env);
+    void show(std::ostream & str) const override; \
+    void eval(EvalState & state, Env & env, Value & v) override; \
+    void bindVars(const StaticEnv & env) override;
 
 struct ExprInt : Expr
 {
@@ -322,6 +322,15 @@ struct ExprPos : Expr
 {
     Pos pos;
     ExprPos(const Pos & pos) : pos(pos) { };
+    COMMON_METHODS
+};
+
+struct ExprInclude : Expr
+{
+    Pos pos;
+    Expr * path;
+    StaticEnv * staticEnv;
+    ExprInclude(const Pos & pos, Expr * path) : pos(pos), path(path) { };
     COMMON_METHODS
 };
 
