@@ -344,6 +344,9 @@ public:
 
     Setting<Paths> pluginFiles{this, {}, "plugin-files",
         "Plugins to dynamically load at nix initialization time."};
+
+    Setting<size_t> narBufferSize{this, 8 * 1024 * 1024, "nar-buffer-size",
+        "Maximum size of NARs before spilling them to disk."};
 };
 
 
