@@ -1142,6 +1142,7 @@ Path LocalStore::addToStore(const string & name, const Path & _srcPath,
 
             if (inMemory) {
                 if (nar.size() + len > settings.narBufferSize) {
+                    printError("warning: adding very large path '%s' to the Nix store", srcPath);
                     inMemory = false;
                     sink << 1;
                     sink((const unsigned char *) nar.data(), nar.size());
