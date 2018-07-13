@@ -8,6 +8,9 @@
 #include "compression.hh"
 #include "download.hh"
 #include "istringstream_nocopy.hh"
+#include "json.hh"
+#include "derivations.hh"
+#include "finally.hh"
 
 #include <aws/core/Aws.h>
 #include <aws/core/VersionConfig.h>
@@ -25,30 +28,18 @@
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
+#include <aws/sqs/SQSClient.h>
+#include <aws/sqs/model/CreateQueueRequest.h>
+#include <aws/sqs/model/DeleteQueueRequest.h>
+#include <aws/sqs/model/ReceiveMessageRequest.h>
+#include <aws/sqs/model/SendMessageRequest.h>
 #include <aws/transfer/TransferManager.h>
+
+#include <nlohmann/json.hpp>
 
 using namespace Aws::Transfer;
 
 namespace nix {
-
-struct S3Error : public Error
-{
-    Aws::S3::S3Errors err;
-    S3Error(Aws::S3::S3Errors err, const FormatOrString & fs)
-        : Error(fs), err(err) { };
-};
-
-/* Helper: given an Outcome<R, E>, return R in case of success, or
-   throw an exception in case of an error. */
-template<typename R, typename E>
-R && checkAws(const FormatOrString & fs, Aws::Utils::Outcome<R, E> && outcome)
-{
-    if (!outcome.IsSuccess())
-        throw S3Error(
-            outcome.GetError().GetErrorType(),
-            fs.s + ": " + outcome.GetError().GetMessage());
-    return outcome.GetResultWithOwnership();
-}
 
 class AwsLogger : public Aws::Utils::Logging::FormattedLogSystem
 {
@@ -86,12 +77,13 @@ static void initAWS()
 
 S3Helper::S3Helper(const std::string & profile, const std::string & region)
     : config(makeConfig(region))
-    , client(make_ref<Aws::S3::S3Client>(
-            profile == ""
+    , credentials(profile == ""
             ? std::dynamic_pointer_cast<Aws::Auth::AWSCredentialsProvider>(
                 std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>())
             : std::dynamic_pointer_cast<Aws::Auth::AWSCredentialsProvider>(
-                std::make_shared<Aws::Auth::ProfileConfigFileAWSCredentialsProvider>(profile.c_str())),
+                std::make_shared<Aws::Auth::ProfileConfigFileAWSCredentialsProvider>(profile.c_str())))
+    , client(make_ref<Aws::S3::S3Client>(
+            credentials,
             *config,
             // FIXME: https://github.com/aws/aws-sdk-cpp/issues/759
 #if AWS_VERSION_MAJOR == 1 && AWS_VERSION_MINOR < 3
@@ -155,7 +147,7 @@ S3Helper::DownloadResult S3Helper::getObject(
             make_ref<std::string>(
                 dynamic_cast<std::stringstream &>(result.GetBody()).str()));
 
-    } catch (S3Error & e) {
+    } catch (AwsError<Aws::S3::S3Errors> & e) {
         if (e.err != Aws::S3::S3Errors::NO_SUCH_KEY) throw;
     }
 
@@ -421,8 +413,132 @@ static RegisterStoreImplementation regStore([](
     const std::string & uri, const Store::Params & params)
     -> std::shared_ptr<Store>
 {
-    if (std::string(uri, 0, 5) != "s3://") return 0;
+    if (!hasPrefix(uri, "s3://")) return 0;
     auto store = std::make_shared<S3BinaryCacheStoreImpl>(params, std::string(uri, 5));
+    store->init();
+    return store;
+});
+
+struct AwsStoreImpl : public S3BinaryCacheStoreImpl, public AwsStore
+{
+    const Setting<std::string> buildQueue{this, "nix-build-queue",
+            "sqs-queue", "The name of the AWS SQS queue to which derivations are posted."};
+
+    ref<Aws::SQS::SQSClient> sqsClient;
+
+    AwsStoreImpl(
+        const Params & params, const std::string & bucketName)
+        : S3BinaryCacheStoreImpl(params, bucketName)
+        , sqsClient(make_ref<Aws::SQS::SQSClient>(s3Helper.credentials, *s3Helper.config))
+    {
+    }
+
+    std::string getUri() override
+    {
+        return "aws://" + bucketName;
+    }
+
+    BuildResult buildDerivation(const Path & drvPath, const BasicDerivation & drv,
+        BuildMode buildMode) override
+    {
+        if (buildMode != bmNormal)
+            throw Error("store '%s' does not support this build mode", getUri());
+
+        auto buildQueueUrl = createQueue(buildQueue);
+        auto resultQueueUrl = createQueue(
+            fmt("nix-build-tmp-%d-%d", time(0), rand()));
+
+        /* Delete the result queue when we're done. */
+        Finally deleteResultQueue([&]() {
+            try {
+                checkAws(fmt("AWS error deleting queue '%s'", resultQueueUrl),
+                    sqsClient->DeleteQueue(
+                        Aws::SQS::Model::DeleteQueueRequest()
+                        .WithQueueUrl(resultQueueUrl)));
+            } catch (...) {
+                ignoreException();
+            }
+        });
+
+        std::ostringstream jsonStr;
+
+        {
+            JSONObject jsonRoot(jsonStr, false);
+            jsonRoot.attr("drvPath", drvPath);
+            {
+                auto drvObj(jsonRoot.object("drv"));
+                drv.toJSON(drvObj);
+            }
+            jsonRoot.attr("resultQueue", resultQueueUrl);
+        }
+
+        checkAws(fmt("AWS error sending message to queue '%s'", buildQueueUrl),
+            sqsClient->SendMessage(
+                Aws::SQS::Model::SendMessageRequest()
+                .WithQueueUrl(buildQueueUrl)
+                .WithMessageBody(jsonStr.str())));
+
+        while (true) {
+            checkInterrupt();
+
+            auto res = checkAws(fmt("AWS error receiving message from queue '%s'", resultQueueUrl),
+                sqsClient->ReceiveMessage(
+                    Aws::SQS::Model::ReceiveMessageRequest()
+                    .WithQueueUrl(resultQueueUrl)
+                    .WithWaitTimeSeconds(20)));
+
+            assert(res.GetMessages().size() <= 1);
+
+            if (res.GetMessages().empty()) continue;
+
+            auto & msg = res.GetMessages()[0];
+
+            debug("got JSON result from SQS: %s", msg.GetBody());
+
+            // FIXME: should not be necessary.
+            auto s = msg.GetBody();
+            s = replaceStrings(s, "&lt;", "<");
+            s = replaceStrings(s, "&gt;", ">");
+
+            auto resultData = nlohmann::json::parse(s);
+
+            BuildResult buildResult;
+            buildResult.status = resultData["status"];
+            buildResult.errorMsg = resultData["errorMsg"];
+            buildResult.startTime = resultData["startTime"];
+            buildResult.stopTime = resultData["stopTime"];
+
+            return buildResult;
+        }
+    }
+
+    std::string createQueue(const std::string & queueName)
+    {
+        auto res = checkAws(fmt("AWS error creating queue '%s'", queueName),
+            sqsClient->CreateQueue(
+                Aws::SQS::Model::CreateQueueRequest()
+                .WithQueueName(queueName)));
+
+        return res.GetQueueUrl();
+    }
+
+    ref<Aws::SQS::SQSClient> getSQSClient() override
+    {
+        return sqsClient;
+    };
+
+    std::string getBuildQueueUrl() override
+    {
+        return createQueue(buildQueue);
+    }
+};
+
+static RegisterStoreImplementation regAwsStore([](
+    const std::string & uri, const Store::Params & params)
+    -> std::shared_ptr<Store>
+{
+    if (!hasPrefix(uri, "aws://")) return 0;
+    auto store = std::make_shared<AwsStoreImpl>(params, std::string(uri, 6));
     store->init();
     return store;
 });

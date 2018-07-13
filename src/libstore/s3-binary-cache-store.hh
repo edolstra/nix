@@ -4,6 +4,8 @@
 
 #include <atomic>
 
+namespace Aws { namespace SQS { class SQSClient; } }
+
 namespace nix {
 
 class S3BinaryCacheStore : public BinaryCacheStore
@@ -28,6 +30,13 @@ public:
     };
 
     virtual const Stats & getS3Stats() = 0;
+};
+
+struct AwsStore
+{
+    virtual ref<Aws::SQS::SQSClient> getSQSClient() = 0;
+
+    virtual std::string getBuildQueueUrl() = 0;
 };
 
 }
