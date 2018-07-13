@@ -3,6 +3,7 @@
 #include "types.hh"
 #include "hash.hh"
 #include "store-api.hh"
+#include "json.hh"
 
 #include <map>
 
@@ -70,6 +71,7 @@ struct BasicDerivation
     /* Return the output paths of a derivation. */
     PathSet outputPaths() const;
 
+    virtual void toJSON(JSONObject & obj) const;
 };
 
 struct Derivation : BasicDerivation
@@ -78,6 +80,8 @@ struct Derivation : BasicDerivation
 
     /* Print a derivation. */
     std::string unparse() const;
+
+    void toJSON(JSONObject & obj) const override;
 };
 
 

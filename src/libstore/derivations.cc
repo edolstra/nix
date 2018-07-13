@@ -433,4 +433,56 @@ std::string hashPlaceholder(const std::string & outputName)
 }
 
 
+void BasicDerivation::toJSON(JSONObject & obj) const
+{
+    {
+        auto outputsObj(obj.object("outputs"));
+        for (auto & output : outputs) {
+            auto outputObj(outputsObj.object(output.first));
+            outputObj.attr("path", output.second.path);
+            if (output.second.hash != "") {
+                outputObj.attr("hashAlgo", output.second.hashAlgo);
+                outputObj.attr("hash", output.second.hash);
+            }
+        }
+    }
+
+    {
+        auto inputsList(obj.list("inputSrcs"));
+        for (auto & input : inputSrcs)
+            inputsList.elem(input);
+    }
+
+    obj.attr("platform", platform);
+    obj.attr("builder", builder);
+
+    {
+        auto argsList(obj.list("args"));
+        for (auto & arg : args)
+            argsList.elem(arg);
+    }
+
+    {
+        auto envObj(obj.object("env"));
+        for (auto & var : env)
+            envObj.attr(var.first, var.second);
+    }
+}
+
+
+void Derivation::toJSON(JSONObject & obj) const
+{
+    BasicDerivation::toJSON(obj);
+
+    {
+        auto inputDrvsObj(obj.object("inputDrvs"));
+        for (auto & input : inputDrvs) {
+            auto inputList(inputDrvsObj.list(input.first));
+            for (auto & outputId : input.second)
+                inputList.elem(outputId);
+        }
+    }
+}
+
+
 }

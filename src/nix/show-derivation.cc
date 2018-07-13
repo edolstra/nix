@@ -62,52 +62,9 @@ struct CmdShowDerivation : InstallablesCommand
 
         for (auto & drvPath : drvPaths) {
             if (!isDerivation(drvPath)) continue;
-
-            auto drvObj(jsonRoot.object(drvPath));
-
             auto drv = readDerivation(drvPath);
-
-            {
-                auto outputsObj(drvObj.object("outputs"));
-                for (auto & output : drv.outputs) {
-                    auto outputObj(outputsObj.object(output.first));
-                    outputObj.attr("path", output.second.path);
-                    if (output.second.hash != "") {
-                        outputObj.attr("hashAlgo", output.second.hashAlgo);
-                        outputObj.attr("hash", output.second.hash);
-                    }
-                }
-            }
-
-            {
-                auto inputsList(drvObj.list("inputSrcs"));
-                for (auto & input : drv.inputSrcs)
-                    inputsList.elem(input);
-            }
-
-            {
-                auto inputDrvsObj(drvObj.object("inputDrvs"));
-                for (auto & input : drv.inputDrvs) {
-                    auto inputList(inputDrvsObj.list(input.first));
-                    for (auto & outputId : input.second)
-                        inputList.elem(outputId);
-                }
-            }
-
-            drvObj.attr("platform", drv.platform);
-            drvObj.attr("builder", drv.builder);
-
-            {
-                auto argsList(drvObj.list("args"));
-                for (auto & arg : drv.args)
-                    argsList.elem(arg);
-            }
-
-            {
-                auto envObj(drvObj.object("env"));
-                for (auto & var : drv.env)
-                    envObj.attr(var.first, var.second);
-            }
+            auto drvObj(jsonRoot.object(drvPath));
+            drv.toJSON(drvObj);
         }
 
         }
