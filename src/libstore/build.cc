@@ -2956,7 +2956,8 @@ void DerivationGoal::runChild()
         /* Execute the program.  This should not return. */
         if (drv->isBuiltin()) {
             try {
-                logger = makeJSONLogger(*logger);
+                auto jsonLogger = makeJSONLogger(*logger);
+                logger = jsonLogger.get();
 
                 BasicDerivation drv2(*drv);
                 for (auto & e : drv2.env)

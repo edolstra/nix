@@ -167,9 +167,9 @@ struct JSONLogger : Logger
     }
 };
 
-Logger * makeJSONLogger(Logger & prevLogger)
+std::unique_ptr<Logger> makeJSONLogger(Logger & prevLogger)
 {
-    return new JSONLogger(prevLogger);
+    return std::make_unique<JSONLogger>(prevLogger);
 }
 
 static Logger::Fields getFields(nlohmann::json & json)

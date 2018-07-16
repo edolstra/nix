@@ -42,7 +42,8 @@ int main (int argc, char * * argv)
     return handleExceptions(argv[0], [&]() {
         initNix();
 
-        logger = makeJSONLogger(*logger);
+        auto jsonLogger = makeJSONLogger(*logger);
+        logger = jsonLogger.get();
 
         /* Ensure we don't get any SSH passphrase or host key popups. */
         unsetenv("DISPLAY");

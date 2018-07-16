@@ -130,7 +130,7 @@ extern Logger * logger;
 
 Logger * makeDefaultLogger();
 
-Logger * makeJSONLogger(Logger & prevLogger);
+std::unique_ptr<Logger> makeJSONLogger(Logger & prevLogger);
 
 bool handleJSONLogMessage(const std::string & msg,
     const Activity & act, std::map<ActivityId, Activity> & activities,
