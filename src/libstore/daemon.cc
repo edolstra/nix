@@ -685,7 +685,7 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
     }
 }
 
-void processConnection(FdSource & from, FdSink & to, bool trusted)
+void processConnection(ref<Store> store, FdSource & from, FdSink & to, bool trusted)
 {
     MonitorFdHup monitor(from.fd);
 
@@ -729,12 +729,6 @@ void processConnection(FdSource & from, FdSink & to, bool trusted)
             querySetting("build-users-group", "") == "")
             throw Error("if you run 'nix-daemon' as root, then you MUST set 'build-users-group'!");
 #endif
-
-        /* Open the store. */
-        Store::Params params; // FIXME: get params from somewhere
-        // Disable caching since the client already does that.
-        params["path-info-cache-size"] = "0";
-        auto store = openStore(settings.storeUri, params);
 
         tunnelLogger->stopWork();
         to.flush();
