@@ -539,4 +539,8 @@ void saveMountNamespace();
 void restoreMountNamespace();
 
 
+/* Create a Unix domain socket in listen mode. */
+AutoCloseFD createUnixDomainSocket(const Path & path, mode_t mode);
+
+
 }
