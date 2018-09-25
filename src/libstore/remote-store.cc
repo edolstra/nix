@@ -342,7 +342,7 @@ void RemoteStore::querySubstitutablePathInfos(const PathSet & paths,
 
 
 void RemoteStore::queryPathInfoUncached(const Path & path,
-    Callback<std::shared_ptr<ValidPathInfo>> callback)
+    Callback<std::shared_ptr<const ValidPathInfo>> callback)
 {
     try {
         std::shared_ptr<ValidPathInfo> info;

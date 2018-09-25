@@ -240,7 +240,7 @@ void BinaryCacheStore::narFromPath(const Path & storePath, Sink & sink)
 }
 
 void BinaryCacheStore::queryPathInfoUncached(const Path & storePath,
-    Callback<std::shared_ptr<ValidPathInfo>> callback)
+    Callback<std::shared_ptr<const ValidPathInfo>> callback)
 {
     auto uri = getUri();
     auto act = std::make_shared<Activity>(*logger, lvlTalkative, actQueryPathInfo,
