@@ -3,6 +3,10 @@
 
 namespace nix::daemon {
 
-void processConnection(ref<Store> store, FdSource & from, FdSink & to, bool trusted);
+enum TrustedFlag : bool { NotTrusted = false, Trusted = true };
+enum RecursiveFlag : bool { NotRecursive = false, Recursive = true };
+
+void processConnection(ref<Store> store, FdSource & from, FdSink & to,
+    TrustedFlag trusted, RecursiveFlag recursive);
 
 }

@@ -191,7 +191,7 @@ static void daemonLoop(char * * argv)
 
             closeOnExec(remote.get());
 
-            bool trusted = false;
+            TrustedFlag trusted = NotTrusted;
             PeerInfo peer = getPeerInfo(remote.get());
 
             struct passwd * pw = peer.uidKnown ? getpwuid(peer.uid) : 0;
@@ -204,7 +204,7 @@ static void daemonLoop(char * * argv)
             Strings allowedUsers = settings.allowedUsers;
 
             if (matchUser(user, group, trustedUsers))
-                trusted = true;
+                trusted = Trusted;
 
             if ((!trusted && !matchUser(user, group, allowedUsers)) || group == settings.buildUsersGroup)
                 throw Error(format("user '%1%' is not allowed to connect to the Nix daemon") % user);
@@ -238,7 +238,7 @@ static void daemonLoop(char * * argv)
                 /* Handle the connection. */
                 FdSource from(remote.get());
                 FdSink to(remote.get());
-                processConnection(openUncachedStore(), from, to, trusted);
+                processConnection(openUncachedStore(), from, to, trusted, NotRecursive);
 
                 exit(0);
             }, options);
@@ -320,7 +320,7 @@ static int _main(int argc, char * * argv)
             } else {
                 FdSource from(STDIN_FILENO);
                 FdSink to(STDOUT_FILENO);
-                processConnection(openUncachedStore(), from, to, true);
+                processConnection(openUncachedStore(), from, to, Trusted, NotRecursive);
             }
         } else {
             daemonLoop(argv);
