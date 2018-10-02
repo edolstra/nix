@@ -4049,9 +4049,6 @@ void SubstitutionGoal::handleEOF(int fd)
 //////////////////////////////////////////////////////////////////////
 
 
-static bool working = false;
-
-
 Worker::Worker(LocalStore & store)
     : act(*logger, actRealise)
     , actDerivations(*logger, actBuilds)
@@ -4059,8 +4056,6 @@ Worker::Worker(LocalStore & store)
     , store(store)
 {
     /* Debugging: prevent recursive workers. */
-    if (working) abort();
-    working = true;
     nrLocalBuilds = 0;
     lastWokenUp = steady_time_point::min();
     permanentFailure = false;
@@ -4070,8 +4065,6 @@ Worker::Worker(LocalStore & store)
 
 Worker::~Worker()
 {
-    working = false;
-
     /* Explicitly get rid of all strong pointers now.  After this all
        goals that refer to this worker should be gone.  (Otherwise we
        are in trouble, since goals may call childTerminated() etc. in
