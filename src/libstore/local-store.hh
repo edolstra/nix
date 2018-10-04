@@ -19,8 +19,9 @@ namespace nix {
 /* Nix store and database schema version.  Version 1 (or 0) was Nix <=
    0.7.  Version 2 was Nix 0.8 and 0.9.  Version 3 is Nix 0.10.
    Version 4 is Nix 0.11.  Version 5 is Nix 0.12-0.16.  Version 6 is
-   Nix 1.0.  Version 7 is Nix 1.3. Version 10 is 2.0. */
-const int nixSchemaVersion = 10;
+   Nix 1.0.  Version 7 is Nix 1.3. Version 10 is 2.0. Version 11 is
+   3.0. */
+const int nixSchemaVersion = 11;
 
 
 struct Derivation;
