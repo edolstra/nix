@@ -6,6 +6,7 @@ pub enum Error {
     BadStorePath(std::path::PathBuf),
     BadNarInfo,
     BadBase32,
+    StorePathNameEmpty,
     StorePathNameTooLong,
     BadStorePathName,
     NarSizeFieldTooBig,
@@ -18,6 +19,7 @@ pub enum Error {
     BadNarField(String),
     BadExecutableField,
     IOError(std::io::Error),
+    #[cfg(unused)]
     HttpError(hyper::error::Error),
     Misc(String),
     Foreign(CppException),
@@ -29,6 +31,7 @@ impl From<std::io::Error> for Error {
     }
 }
 
+#[cfg(unused)]
 impl From<hyper::error::Error> for Error {
     fn from(err: hyper::error::Error) -> Self {
         Error::HttpError(err)
@@ -42,6 +45,7 @@ impl fmt::Display for Error {
             Error::BadNarInfo => write!(f, ".narinfo file is corrupt"),
             Error::BadStorePath(path) => write!(f, "path '{}' is not a store path", path.display()),
             Error::BadBase32 => write!(f, "invalid base32 string"),
+            Error::StorePathNameEmpty => write!(f, "store path name is empty"),
             Error::StorePathNameTooLong => {
                 write!(f, "store path name is longer than 211 characters")
             }
@@ -56,6 +60,7 @@ impl fmt::Display for Error {
             Error::BadNarField(s) => write!(f, "unrecognized NAR field '{}'", s),
             Error::BadExecutableField => write!(f, "bad 'executable' field in NAR"),
             Error::IOError(err) => write!(f, "I/O error: {}", err),
+            #[cfg(unused)]
             Error::HttpError(err) => write!(f, "HTTP error: {}", err),
             Error::Foreign(_) => write!(f, "<C++ exception>"), // FIXME
             Error::Misc(s) => write!(f, "{}", s),

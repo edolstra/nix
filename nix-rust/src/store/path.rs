@@ -23,8 +23,15 @@ impl StorePath {
         )
     }
 
+    pub fn from_parts(hash: [u8; STORE_PATH_HASH_BYTES], name: &str) -> Result<Self, Error> {
+        Ok(StorePath {
+            hash: StorePathHash(hash),
+            name: StorePathName::new(name)?,
+        })
+    }
+
     pub fn new_from_base_name(base_name: &str) -> Result<Self, Error> {
-        if base_name.len() < STORE_PATH_HASH_CHARS + 2
+        if base_name.len() < STORE_PATH_HASH_CHARS + 1
             || base_name.as_bytes()[STORE_PATH_HASH_CHARS] != '-' as u8
         {
             return Err(Error::BadStorePath(base_name.into()));
@@ -43,7 +50,7 @@ impl fmt::Display for StorePath {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StorePathHash([u8; STORE_PATH_HASH_BYTES]);
 
 impl StorePathHash {
@@ -55,6 +62,10 @@ impl StorePathHash {
         bytes.copy_from_slice(&v[0..STORE_PATH_HASH_BYTES]);
         Ok(Self(bytes))
     }
+
+    pub fn hash<'a>(&'a self) -> &'a [u8; STORE_PATH_HASH_BYTES] {
+        &self.0
+    }
 }
 
 impl fmt::Display for StorePathHash {
@@ -63,11 +74,30 @@ impl fmt::Display for StorePathHash {
     }
 }
 
+impl Ord for StorePathHash {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Historically we've sorted store paths by their base32
+        // serialization, but our base32 encodes bytes in reverse
+        // order. So compare them in reverse order as well.
+        self.0.iter().rev().cmp(other.0.iter().rev())
+    }
+}
+
+impl PartialOrd for StorePathHash {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct StorePathName(String);
 
 impl StorePathName {
     pub fn new(s: &str) -> Result<Self, Error> {
+        if s.len() == 0 {
+            return Err(Error::StorePathNameEmpty);
+        }
+
         if s.len() > 211 {
             return Err(Error::StorePathNameTooLong);
         }
@@ -89,6 +119,10 @@ impl StorePathName {
 
         Ok(Self(s.to_string()))
     }
+
+    pub fn name<'a>(&'a self) -> &'a str {
+        &self.0
+    }
 }
 
 impl fmt::Display for StorePathName {
@@ -97,4 +131,90 @@ impl fmt::Display for StorePathName {
     }
 }
 
-// FIXME: add tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3";
+        let p = StorePath::new_from_base_name(&s).unwrap();
+        assert_eq!(p.name.0, "konsole-18.12.3");
+        assert_eq!(
+            p.hash.0,
+            [
+                0x9f, 0x76, 0x49, 0x20, 0xf6, 0x5d, 0xe9, 0x71, 0xc4, 0xca, 0x46, 0x21, 0xab, 0xff,
+                0x9b, 0x44, 0xef, 0x87, 0x0f, 0x3c
+            ]
+        );
+    }
+
+    #[test]
+    fn test_no_name() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-";
+        assert_matches!(
+            StorePath::new_from_base_name(&s),
+            Err(Error::StorePathNameEmpty)
+        );
+    }
+
+    #[test]
+    fn test_no_dash() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz";
+        assert_matches!(
+            StorePath::new_from_base_name(&s),
+            Err(Error::BadStorePath(_))
+        );
+    }
+
+    #[test]
+    fn test_short_hash() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxl-konsole-18.12.3";
+        assert_matches!(
+            StorePath::new_from_base_name(&s),
+            Err(Error::BadStorePath(_))
+        );
+    }
+
+    #[test]
+    fn test_invalid_hash() {
+        let s = "7h7qgvs4kgzsn8e6rb273saxyqh4jxlz-konsole-18.12.3";
+        assert_matches!(StorePath::new_from_base_name(&s), Err(Error::BadBase32));
+    }
+
+    #[test]
+    fn test_long_name() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+        assert_matches!(StorePath::new_from_base_name(&s), Ok(_));
+    }
+
+    #[test]
+    fn test_too_long_name() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+        assert_matches!(
+            StorePath::new_from_base_name(&s),
+            Err(Error::StorePathNameTooLong)
+        );
+    }
+
+    #[test]
+    fn test_bad_name() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-foo bar";
+        assert_matches!(
+            StorePath::new_from_base_name(&s),
+            Err(Error::BadStorePathName)
+        );
+
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-kónsole";
+        assert_matches!(
+            StorePath::new_from_base_name(&s),
+            Err(Error::BadStorePathName)
+        );
+    }
+
+    #[test]
+    fn test_roundtrip() {
+        let s = "7h7qgvs4kgzsn8a6rb273saxyqh4jxlz-konsole-18.12.3";
+        assert_eq!(StorePath::new_from_base_name(&s).unwrap().to_string(), s);
+    }
+}

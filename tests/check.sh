@@ -3,7 +3,7 @@ source common.sh
 clearStore
 
 nix-build dependencies.nix --no-out-link
-nix-build dependencies.nix --no-out-link --check
+nix-build dependencies.nix --no-out-link --check -vvvvv
 
 nix-build check.nix -A nondeterministic --no-out-link
 nix-build check.nix -A nondeterministic --no-out-link --check 2> $TEST_ROOT/log || status=$?
