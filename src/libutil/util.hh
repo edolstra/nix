@@ -203,6 +203,9 @@ public:
 };
 
 
+/* Recursively chown a path. */
+void chownPath(const Path & path, const uid_t uid, const gid_t gid);
+
 /* Create a temporary directory. */
 Path createTempDir(const Path & tmpRoot = "", const Path & prefix = "nix",
     bool includePid = true, bool useGlobalCounter = true, mode_t mode = 0755);

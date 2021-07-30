@@ -42,6 +42,15 @@ struct LocalStoreConfig : virtual LocalFSStoreConfig
     const std::string name() override { return "Local Store"; }
 };
 
+struct Ownership
+{
+    bool setOwnership = false;
+    std::optional<std::string> user, group;
+    uid_t uid = geteuid();
+    gid_t gid = getegid();
+    mode_t perm_mask = (S_IRUSR|S_IXUSR);
+};
+
 
 class LocalStore : public virtual LocalStoreConfig, public virtual LocalFSStore
 {
@@ -312,9 +321,10 @@ typedef set<Inode> InodesSeen;
      without execute permission; setuid bits etc. are cleared)
    - the owner and group are set to the Nix user and group, if we're
      running as root. */
-void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & inodesSeen);
+void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & inodesSeen, Ownership & ownership);
 void canonicalisePathMetaData(const Path & path, uid_t fromUid);
 
+void canonicaliseTimestampAndPermissions(const Path & path, Ownership & ownership);
 void canonicaliseTimestampAndPermissions(const Path & path);
 
 MakeError(PathInUse, Error);

@@ -508,17 +508,33 @@ void LocalStore::makeStoreWritable()
 const time_t mtimeStore = 1; /* 1 second into the epoch */
 
 
-static void canonicaliseTimestampAndPermissions(const Path & path, const struct stat & st)
+static void canonicaliseTimestampAndPermissions(const Path & path, const struct stat & st, Ownership & ownership)
 {
     if (!S_ISLNK(st.st_mode)) {
 
         /* Mask out all type related bits. */
         mode_t mode = st.st_mode & ~S_IFMT;
 
-        if (mode != 0444 && mode != 0555) {
+        /* Define mask of permitted bits. */
+        mode_t perm_mask = 0555;
+
+        /* If also setting the ownership of the package, apply the more
+           restrictive permissions mask as implied by the owner and group,
+           if provided. */
+        if (ownership.setOwnership)
+            perm_mask &= ownership.perm_mask;
+
+        if ((st.st_mode & perm_mask) != st.st_mode) {
             mode = (st.st_mode & S_IFMT)
                  | 0444
                  | (st.st_mode & S_IXUSR ? 0111 : 0);
+            mode &= (perm_mask | S_IFMT);
+
+            debug(format(
+                "changing mode of '%1%' from %2$o to %3$o as uid %4%, perm_mask = %5$o, "
+                "st.st_uid = %6%, st.st_gid = %7%, ownership.uid = %8%, ownership.gid = %9%"
+            ) % path % st.st_mode % mode % geteuid() % perm_mask
+              % st.st_uid % st.st_gid % ownership.uid % ownership.gid);
             if (chmod(path.c_str(), mode) == -1)
                 throw SysError("changing mode of '%1%' to %2$o", path, mode);
         }
@@ -543,13 +559,20 @@ static void canonicaliseTimestampAndPermissions(const Path & path, const struct 
 }
 
 
-void canonicaliseTimestampAndPermissions(const Path & path)
+void canonicaliseTimestampAndPermissions(const Path & path, Ownership & ownership)
 {
-    canonicaliseTimestampAndPermissions(path, lstat(path));
+    canonicaliseTimestampAndPermissions(path, lstat(path), ownership);
 }
 
 
-static void canonicalisePathMetaData_(const Path & path, uid_t fromUid, InodesSeen & inodesSeen)
+void canonicaliseTimestampAndPermissions(const Path & path)
+{
+    Ownership ownership;
+    canonicaliseTimestampAndPermissions(path, ownership);
+}
+
+
+static void canonicalisePathMetaData_(const Path & path, uid_t fromUid, InodesSeen & inodesSeen, Ownership & ownership)
 {
     checkInterrupt();
 
@@ -608,7 +631,7 @@ static void canonicalisePathMetaData_(const Path & path, uid_t fromUid, InodesSe
 
     inodesSeen.insert(Inode(st.st_dev, st.st_ino));
 
-    canonicaliseTimestampAndPermissions(path, st);
+    canonicaliseTimestampAndPermissions(path, st, ownership);
 
     /* Change ownership to the current uid.  If it's a symlink, use
        lchown if available, otherwise don't bother.  Wrong ownership
@@ -617,29 +640,34 @@ static void canonicalisePathMetaData_(const Path & path, uid_t fromUid, InodesSe
        writable.  The only exception is top-level paths in the Nix
        store (since that directory is group-writable for the Nix build
        users group); we check for this case below. */
-    if (st.st_uid != geteuid()) {
+    if (geteuid() == 0 && (st.st_uid != ownership.uid || st.st_gid != ownership.gid)) {
+        debug(format("changing owner of '%1%' from %2%/%3% to %4%/%5%")
+            % path % st.st_uid % st.st_gid % ownership.uid % ownership.gid);
 #if HAVE_LCHOWN
-        if (lchown(path.c_str(), geteuid(), getegid()) == -1)
+        if (lchown(path.c_str(), ownership.uid, ownership.gid) == -1)
 #else
         if (!S_ISLNK(st.st_mode) &&
-            chown(path.c_str(), geteuid(), getegid()) == -1)
+            chown(path.c_str(), ownership.uid, ownership.gid) == -1)
 #endif
             throw SysError("changing owner of '%1%' to %2%",
-                path, geteuid());
+                path, ownership.uid);
     }
 
     if (S_ISDIR(st.st_mode)) {
         DirEntries entries = readDirectory(path);
         for (auto & i : entries)
-            canonicalisePathMetaData_(path + "/" + i.name, fromUid, inodesSeen);
+            canonicalisePathMetaData_(path + "/" + i.name, fromUid, inodesSeen, ownership);
     }
 }
 
 
-void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & inodesSeen)
+void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & inodesSeen, Ownership & ownership)
 {
-    canonicalisePathMetaData_(path, fromUid, inodesSeen);
+    canonicalisePathMetaData_(path, fromUid, inodesSeen, ownership);
 
+    /* XXX We can no longer make this assertion now that packages
+       can be owned by more than just the build user and/or root. */
+#if 0
     /* On platforms that don't have lchown(), the top-level path can't
        be a symlink, since we can't change its ownership. */
     auto st = lstat(path);
@@ -648,13 +676,15 @@ void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & ino
         assert(S_ISLNK(st.st_mode));
         throw Error("wrong ownership of top-level store path '%1%'", path);
     }
+#endif
 }
 
 
 void canonicalisePathMetaData(const Path & path, uid_t fromUid)
 {
     InodesSeen inodesSeen;
-    canonicalisePathMetaData(path, fromUid, inodesSeen);
+    Ownership ownership;
+    canonicalisePathMetaData(path, fromUid, inodesSeen, ownership);
 }
 
 

@@ -303,14 +303,18 @@ struct RestoreSink : ParseSink
     void createDirectory(const Path & path) override
     {
         Path p = dstPath + path;
-        if (mkdir(p.c_str(), 0777) == -1)
+        /* Extract NAR securely at first to prevent race condition during
+           which protected files are visible. */
+        if (mkdir(p.c_str(), 0700) == -1)
             throw SysError("creating directory '%1%'", p);
     };
 
     void createRegularFile(const Path & path) override
     {
         Path p = dstPath + path;
-        fd = open(p.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0666);
+        /* Extract NAR securely at first to prevent race condition during
+           which protected files are visible. */
+        fd = open(p.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
         if (!fd) throw SysError("creating file '%1%'", p);
     }
 

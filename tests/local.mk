@@ -24,6 +24,7 @@ nix_tests = \
   build-remote-content-addressed-floating.sh \
   ssh-relay.sh \
   nar-access.sh \
+  ownership-user-group.sh ownership-user.sh ownership-group.sh \
   structured-attrs.sh \
   fetchGit.sh \
   fetchGitRefs.sh \

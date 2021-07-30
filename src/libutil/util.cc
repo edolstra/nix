@@ -389,6 +389,35 @@ void writeLine(int fd, string s)
 }
 
 
+void chownPath(const Path & path, const uid_t uid, const gid_t gid)
+{
+    checkInterrupt();
+
+    /* No point continuing unless running as root. This runs as users other
+       than root in non-daemon mode so this must not be fatal. */
+    if (geteuid() != 0) return;
+
+    struct stat st;
+    if (lstat(path.c_str(), &st) == -1) {
+        if (errno == ENOENT) return;
+        throw SysError("getting status of '%1%'", path);
+    }
+
+    /* set ownership */
+    if (st.st_uid != uid || st.st_gid != gid) {
+        debug("changing ownership of path '%1%' from %2%/%3% to %4%/%5%",
+            path, st.st_uid, st.st_gid, uid, gid);
+        if (chown(path.c_str(), uid, gid) != 0)
+            throw SysError("setting ownership of path '%1%'", path);
+    }
+
+    /* recurse */
+    if (S_ISDIR(st.st_mode))
+        for (auto & i : readDirectory(path))
+            chownPath(path + "/" + i.name, uid, gid);
+}
+
+
 static void _deletePath(int parentfd, const Path & path, uint64_t & bytesFreed)
 {
     checkInterrupt();

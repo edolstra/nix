@@ -241,6 +241,26 @@ void DerivationGoal::haveDerivation()
 
     parsedDrv = std::make_unique<ParsedDerivation>(drvPath, *drv);
 
+    /* If provided, package contents will be chown'd and chmod'd to be readable
+       by only the supplied owner and/or group. Populate ownership struct for
+       the purpose of conveying this to canonicaliseTimestampAndPermissions(). */
+    ownership.user = parsedDrv->getStringAttr("ownershipUser");
+    if (ownership.user) {
+        struct passwd * owner_pw = getpwnam(ownership.user->c_str());
+        if (!owner_pw)
+            throw Error("the user '%s' does not exist", ownership.user->c_str());
+        ownership.uid = owner_pw->pw_uid;
+        ownership.setOwnership = true;
+    }
+    ownership.group = parsedDrv->getStringAttr("ownershipGroup");
+    if (ownership.group) {
+        struct group * group_gr = getgrnam(ownership.group->c_str());
+        if (!group_gr)
+            throw Error("the group '%s' does not exist", ownership.group->c_str());
+        ownership.gid = group_gr->gr_gid;
+        ownership.perm_mask |= (S_IRGRP|S_IXGRP);
+        ownership.setOwnership = true;
+    }
 
     /* We are first going to try to create the invalid output paths
        through substitutes.  If that doesn't work, we'll build
@@ -885,6 +905,20 @@ void DerivationGoal::buildDone()
             drvPath,
             outputPaths
         );
+
+        /* If owner and/or group has been specified then the permissions of
+           files and directories in the package mode will be restricted.
+           Set the owner/group now to grant access to the package. */
+        if (ownership.setOwnership) {
+            InodesSeen inodesSeen;
+            for (auto & i : drv->outputsAndOptPaths(worker.store))
+                if (i.second.second) {
+                    // MICHAEL - turn StorePath into Path type
+                    Path outPath = worker.store.Store::toRealPath(*i.second.second);
+                    chownPath(outPath, ownership.uid, ownership.gid);
+                    canonicalisePathMetaData(outPath, -1, inodesSeen, ownership);
+                }
+        }
 
         if (buildMode == bmCheck) {
             cleanupPostOutputsRegisteredModeCheck();

@@ -2152,7 +2152,7 @@ void LocalDerivationGoal::registerOutputs()
         /* Canonicalise first.  This ensures that the path we're
            rewriting doesn't contain a hard link to /etc/shadow or
            something like that. */
-        canonicalisePathMetaData(actualPath, buildUser ? buildUser->getUID() : -1, inodesSeen);
+        canonicalisePathMetaData(actualPath, buildUser ? buildUser->getUID() : -1, inodesSeen, ownership);
 
         debug("scanning for references for output '%s' in temp location '%s'", outputName, actualPath);
 
@@ -2387,7 +2387,7 @@ void LocalDerivationGoal::registerOutputs()
 
         /* FIXME: set proper permissions in restorePath() so
             we don't have to do another traversal. */
-        canonicalisePathMetaData(actualPath, -1, inodesSeen);
+        canonicalisePathMetaData(actualPath, -1, inodesSeen, ownership);
 
         /* Calculate where we'll move the output files. In the checking case we
            will leave leave them where they are, for now, rather than move to

@@ -5,6 +5,7 @@
 #include "store-api.hh"
 #include "pathlocks.hh"
 #include "goal.hh"
+#include "local-store.hh" // TODO remove, along with remaining downcasts
 
 namespace nix {
 
@@ -134,6 +135,10 @@ struct DerivationGoal : public Goal
 
     /* The remote machine on which we're building. */
     std::string machineName;
+
+    /* If provided, package contents will be chown'd and chmod'd to be readable
+       by only the supplied owner and/or group. */
+    Ownership ownership;
 
     DerivationGoal(const StorePath & drvPath,
         const StringSet & wantedOutputs, Worker & worker,
