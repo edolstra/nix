@@ -1237,7 +1237,7 @@ static void prim_derivationStrict(EvalState & state, const Pos & pos, Value * * 
     }
 
     /* Write the resulting term into the Nix store directory. */
-    auto drvPath = writeDerivation(*state.store, drv, state.repair);
+    auto drvPath = writeDerivation(*state.store, drv, state.repair, false, settings.getOwner());
     auto drvPathS = state.store->printStorePath(drvPath);
 
     printMsg(lvlChatty, "instantiated '%1%' -> '%2%'", drvName, drvPathS);
@@ -1923,7 +1923,7 @@ static void addPath(
         if (!expectedHash || !state.store->isValidPath(*expectedStorePath)) {
             dstPath = state.store->printStorePath(settings.readOnlyMode
                 ? state.store->computeStorePathForPath(name, path, method, htSHA256, filter).first
-                : state.store->addToStore(name, path, method, htSHA256, filter, state.repair, refs));
+                : state.store->addToStore(name, path, method, htSHA256, filter, state.repair, refs, settings.getOwner()));
             if (expectedHash && expectedStorePath != state.store->parseStorePath(dstPath))
                 throw Error("store path mismatch in (possibly filtered) path added from '%s'", path);
         } else

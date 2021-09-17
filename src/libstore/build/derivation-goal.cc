@@ -194,7 +194,7 @@ void DerivationGoal::loadDerivation()
     assert(worker.evalStore.isValidPath(drvPath));
 
     /* Get the derivation. */
-    drv = std::make_unique<Derivation>(worker.evalStore.readDerivation(drvPath));
+    drv = std::make_unique<Derivation>(worker.evalStore.readDerivation(drvPath, worker.owner));
 
     haveDerivation();
 }
@@ -615,12 +615,15 @@ void DerivationGoal::tryToBuild()
 
     /* Don't do a remote build if the derivation has the attribute
        `preferLocalBuild' set.  Also, check and repair modes are only
-       supported for local builds. */
+       supported for local builds. FIXME: handle private remote
+       builds. */
     bool buildLocally =
-        (buildMode != bmNormal || parsedDrv->willBuildLocally(worker.store))
-        && settings.maxBuildJobs.get() != 0;
+        ((buildMode != bmNormal || parsedDrv->willBuildLocally(worker.store))
+            && settings.maxBuildJobs.get() != 0)
+        || worker.owner;
 
     if (!buildLocally) {
+
         switch (tryBuildHook()) {
             case rpAccept:
                 /* Yes, it has started doing so.  Wait until we get
@@ -651,7 +654,8 @@ void DerivationGoal::tryToBuild()
     worker.wakeUp(shared_from_this());
 }
 
-void DerivationGoal::tryLocalBuild() {
+void DerivationGoal::tryLocalBuild()
+{
     throw Error(
         "unable to build with a primary store that isn't a local store; "
         "either pass a different '--store' or enable remote builds."

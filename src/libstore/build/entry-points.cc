@@ -5,9 +5,13 @@
 
 namespace nix {
 
-void Store::buildPaths(const std::vector<DerivedPath> & reqs, BuildMode buildMode, std::shared_ptr<Store> evalStore)
+void Store::buildPaths(
+    const std::vector<DerivedPath> & reqs,
+    BuildMode buildMode,
+    std::shared_ptr<Store> evalStore,
+    const Owner & owner)
 {
-    Worker worker(*this, evalStore ? *evalStore : *this);
+    Worker worker(*this, evalStore ? *evalStore : *this, owner);
 
     Goals goals;
     for (const auto & br : reqs) {
@@ -47,10 +51,12 @@ void Store::buildPaths(const std::vector<DerivedPath> & reqs, BuildMode buildMod
     }
 }
 
-BuildResult Store::buildDerivation(const StorePath & drvPath, const BasicDerivation & drv,
+BuildResult Store::buildDerivation(
+    const StorePath & drvPath,
+    const BasicDerivation & drv,
     BuildMode buildMode)
 {
-    Worker worker(*this, *this);
+    Worker worker(*this, *this, {});
     auto goal = worker.makeBasicDerivationGoal(drvPath, drv, {}, buildMode);
 
     BuildResult result;
@@ -87,12 +93,14 @@ BuildResult Store::buildDerivation(const StorePath & drvPath, const BasicDerivat
 }
 
 
-void Store::ensurePath(const StorePath & path)
+void Store::ensurePath(
+    const StorePath & path,
+    const Owner & owner)
 {
     /* If the path is already valid, we're done. */
     if (isValidPath(path)) return;
 
-    Worker worker(*this, *this);
+    Worker worker(*this, *this, owner);
     GoalPtr goal = worker.makePathSubstitutionGoal(path);
     Goals goals = {goal};
 
@@ -110,7 +118,7 @@ void Store::ensurePath(const StorePath & path)
 
 void LocalStore::repairPath(const StorePath & path)
 {
-    Worker worker(*this, *this);
+    Worker worker(*this, *this, {});
     GoalPtr goal = worker.makePathSubstitutionGoal(path, Repair);
     Goals goals = {goal};
 

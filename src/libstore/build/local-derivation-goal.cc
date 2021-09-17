@@ -275,6 +275,9 @@ void LocalDerivationGoal::cleanupPostChildKill()
 
     /* Terminate the recursive Nix daemon. */
     stopDaemon();
+
+    /* Remove temporary ACLs. */
+    removeAccess();
 }
 
 
@@ -659,6 +662,30 @@ void LocalDerivationGoal::startBuilder()
     if (needsHashRewrite() && pathExists(homeDir))
         throw Error("home directory '%1%' exists; please remove it to assure purity of builds without sandboxing", homeDir);
 
+    /* Make the input closure temporarily accessible to the build
+       user. FIXME: needs to be done in topo order to preserve the
+       privacy invariant, in case we get interrupted. */
+    if (buildUser) {
+        removeAccess();
+
+        /* Record the store paths to which we add an ACL so we can
+           remove them later. */
+        // FIXME: this should probably be the stateDir of the store.
+        // FIXME: don't register paths that are public (i.e. when
+        // grantAccess() is a no-op).
+        auto tempAclsDir = settings.nixStateDir + "/temp-acls";
+        createDirs(tempAclsDir);
+        writeFile(
+            tempAclsDir + "/" + buildUser->getUser(),
+            concatStringsSep("\n", worker.store.printStorePathSet(inputPaths)));
+        // FIXME: sync file
+
+        for (auto & path : inputPaths) {
+            printError("EXTEND %s", worker.store.printStorePath(path));
+            worker.store.grantAccess(path, StoreUser { .userName = buildUser->getUser() }); // FIXME: use uid?
+        }
+    }
+
     if (useChroot && settings.preBuildHook != "" && dynamic_cast<Derivation *>(drv.get())) {
         printMsg(lvlChatty, format("executing pre-build hook '%1%'")
             % settings.preBuildHook);
@@ -963,6 +990,22 @@ void LocalDerivationGoal::startBuilder()
 }
 
 
+void LocalDerivationGoal::removeAccess()
+{
+    if (!buildUser) return;
+
+    auto tempAclsDir = settings.nixStateDir + "/temp-acls";
+    auto tempAcls = worker.store.parseStorePathSet(
+        tokenizeString<StringSet>(
+            readFile(tempAclsDir + "/" + buildUser->getUser())));
+
+    for (auto & path : tempAcls) {
+        printError("REMOVE %s", worker.store.printStorePath(path));
+        worker.store.removeAccess(path, StoreUser { .userName = buildUser->getUser() });
+    }
+}
+
+
 void LocalDerivationGoal::initTmpDir() {
     /* In a sandbox, for determinism, always use the same temporary
        directory. */
@@ -1184,32 +1227,50 @@ struct RestrictedStore : public virtual RestrictedStoreConfig, public virtual Lo
     std::optional<StorePath> queryPathFromHashPart(const std::string & hashPart) override
     { throw Error("queryPathFromHashPart"); }
 
-    StorePath addToStore(const string & name, const Path & srcPath,
-        FileIngestionMethod method = FileIngestionMethod::Recursive, HashType hashAlgo = htSHA256,
-        PathFilter & filter = defaultPathFilter, RepairFlag repair = NoRepair,
-        const StorePathSet & references = StorePathSet()) override
+    StorePath addToStore(
+        const string & name,
+        const Path & srcPath,
+        FileIngestionMethod method,
+        HashType hashAlgo,
+        PathFilter & filter,
+        RepairFlag repair,
+        const StorePathSet & references,
+        const Owner & owner) override
     { throw Error("addToStore"); }
 
-    void addToStore(const ValidPathInfo & info, Source & narSource,
-        RepairFlag repair = NoRepair, CheckSigsFlag checkSigs = CheckSigs) override
+    void addToStore(
+        const ValidPathInfo & info,
+        Source & narSource,
+        RepairFlag repair,
+        CheckSigsFlag checkSigs,
+        const Owner & owner) override
     {
-        next->addToStore(info, narSource, repair, checkSigs);
+        next->addToStore(info, narSource, repair, checkSigs, owner);
         goal.addDependency(info.path);
     }
 
-    StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair = NoRepair) override
+    StorePath addTextToStore(
+        const std::string & name,
+        const std::string & s,
+        const StorePathSet & references,
+        RepairFlag repair,
+        const Owner & owner) override
     {
-        auto path = next->addTextToStore(name, s, references, repair);
+        auto path = next->addTextToStore(name, s, references, repair, owner);
         goal.addDependency(path);
         return path;
     }
 
-    StorePath addToStoreFromDump(Source & dump, const string & name,
-        FileIngestionMethod method = FileIngestionMethod::Recursive, HashType hashAlgo = htSHA256, RepairFlag repair = NoRepair,
-        const StorePathSet & references = StorePathSet()) override
+    StorePath addToStoreFromDump(
+        Source & dump,
+        const std::string & name,
+        FileIngestionMethod method,
+        HashType hashAlgo,
+        RepairFlag repair,
+        const StorePathSet & references,
+        const Owner & owner) override
     {
-        auto path = next->addToStoreFromDump(dump, name, method, hashAlgo, repair, references);
+        auto path = next->addToStoreFromDump(dump, name, method, hashAlgo, repair, references, owner);
         goal.addDependency(path);
         return path;
     }
@@ -1221,8 +1282,13 @@ struct RestrictedStore : public virtual RestrictedStoreConfig, public virtual Lo
         LocalFSStore::narFromPath(path, sink);
     }
 
-    void ensurePath(const StorePath & path) override
+    void ensurePath(
+        const StorePath & path,
+        const Owner & owner) override
     {
+        if (owner)
+            throw Error("recursive Nix does not support specifying an owner");
+
         if (!goal.isAllowed(path))
             throw InvalidPath("cannot substitute unknown path '%s' in recursive Nix", printStorePath(path));
         /* Nothing to be done; 'path' must already be valid. */
@@ -1243,11 +1309,18 @@ struct RestrictedStore : public virtual RestrictedStoreConfig, public virtual Lo
         next->queryRealisation(id, std::move(callback));
     }
 
-    void buildPaths(const std::vector<DerivedPath> & paths, BuildMode buildMode, std::shared_ptr<Store> evalStore) override
+    void buildPaths(
+        const std::vector<DerivedPath> & paths,
+        BuildMode buildMode,
+        std::shared_ptr<Store> evalStore,
+        const Owner & owner) override
     {
         assert(!evalStore);
 
         if (buildMode != bmNormal) throw Error("unsupported build mode");
+
+        if (owner)
+            throw Error("recursive Nix does not support specifying an owner");
 
         StorePathSet newPaths;
         std::set<Realisation> newRealisations;
@@ -1377,7 +1450,7 @@ void LocalDerivationGoal::startDaemon()
                 FdSink to(remote.get());
                 try {
                     daemon::processConnection(store, from, to,
-                        daemon::NotTrusted, daemon::Recursive,
+                        daemon::NotTrusted, {}, daemon::Recursive,
                         [&](Store & store) { store.createUser("nobody", 65535); });
                     debug("terminated daemon connection");
                 } catch (SysError &) {
@@ -2063,6 +2136,7 @@ void LocalDerivationGoal::registerOutputs()
        floating content-addressed derivations this isn't the case.
      */
     if (hook) {
+        assert(!worker.owner);
         DerivationGoal::registerOutputs();
         return;
     }
@@ -2147,7 +2221,8 @@ void LocalDerivationGoal::registerOutputs()
         /* Canonicalise first.  This ensures that the path we're
            rewriting doesn't contain a hard link to /etc/shadow or
            something like that. */
-        canonicalisePathMetaData(actualPath, buildUser ? buildUser->getUID() : -1, inodesSeen);
+        // FIXME: maybe we should copy the entire ACL of the derivation.
+        canonicalisePathMetaData(actualPath, buildUser ? buildUser->getUID() : -1, worker.owner, inodesSeen);
 
         debug("scanning for references for output '%s' in temp location '%s'", outputName, actualPath);
 
@@ -2381,7 +2456,8 @@ void LocalDerivationGoal::registerOutputs()
 
         /* FIXME: set proper permissions in restorePath() so
             we don't have to do another traversal. */
-        canonicalisePathMetaData(actualPath, -1, inodesSeen);
+        // FIXME: maybe we should copy the entire ACL of the derivation.
+        canonicalisePathMetaData(actualPath, -1, worker.owner, inodesSeen);
 
         /* Calculate where we'll move the output files. In the checking case we
            will leave leave them where they are, for now, rather than move to
@@ -2467,7 +2543,7 @@ void LocalDerivationGoal::registerOutputs()
         }
 
         if (curRound == nrRounds) {
-            localStore.optimisePath(actualPath, NoRepair); // FIXME: combine with scanForReferences()
+            localStore.maybeOptimisePath(newInfo.path, NoRepair); // FIXME: combine with scanForReferences()
             worker.markContentsGood(newInfo.path);
         }
 

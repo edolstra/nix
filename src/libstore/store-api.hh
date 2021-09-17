@@ -1,5 +1,6 @@
 #pragma once
 
+#include "store-types.hh"
 #include "realisation.hh"
 #include "path.hh"
 #include "derived-path.hh"
@@ -469,8 +470,12 @@ public:
         SubstitutablePathInfos & infos) { return; };
 
     /* Import a path into the store. */
-    virtual void addToStore(const ValidPathInfo & info, Source & narSource,
-        RepairFlag repair = NoRepair, CheckSigsFlag checkSigs = CheckSigs) = 0;
+    virtual void addToStore(
+        const ValidPathInfo & info,
+        Source & narSource,
+        RepairFlag repair = NoRepair,
+        CheckSigsFlag checkSigs = CheckSigs,
+        const Owner & owner = {}) = 0;
 
     /* Import multiple paths into the store. */
     virtual void addMultipleToStore(
@@ -482,9 +487,15 @@ public:
        validity the resulting path.  The resulting path is returned.
        The function object `filter' can be used to exclude files (see
        libutil/archive.hh). */
-    virtual StorePath addToStore(const string & name, const Path & srcPath,
-        FileIngestionMethod method = FileIngestionMethod::Recursive, HashType hashAlgo = htSHA256,
-        PathFilter & filter = defaultPathFilter, RepairFlag repair = NoRepair, const StorePathSet & references = StorePathSet());
+    virtual StorePath addToStore(
+        const string & name,
+        const Path & srcPath,
+        FileIngestionMethod method = FileIngestionMethod::Recursive,
+        HashType hashAlgo = htSHA256,
+        PathFilter & filter = defaultPathFilter,
+        RepairFlag repair = NoRepair,
+        const StorePathSet & references = StorePathSet(),
+        const Owner & owner = {});
 
     /* Copy the contents of a path to the store and register the
        validity the resulting path, using a constant amount of
@@ -499,15 +510,24 @@ public:
        false).
        `dump` may be drained */
     // FIXME: remove?
-    virtual StorePath addToStoreFromDump(Source & dump, const string & name,
-        FileIngestionMethod method = FileIngestionMethod::Recursive, HashType hashAlgo = htSHA256, RepairFlag repair = NoRepair,
-        const StorePathSet & references = StorePathSet())
+    virtual StorePath addToStoreFromDump(
+        Source & dump,
+        const string & name,
+        FileIngestionMethod method = FileIngestionMethod::Recursive,
+        HashType hashAlgo = htSHA256,
+        RepairFlag repair = NoRepair,
+        const StorePathSet & references = StorePathSet(),
+        const Owner & owner = {})
     { unsupported("addToStoreFromDump"); }
 
     /* Like addToStore, but the contents written to the output path is
        a regular file containing the given string. */
-    virtual StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair = NoRepair) = 0;
+    virtual StorePath addTextToStore(
+        const std::string & name,
+        const std::string & s,
+        const StorePathSet & references,
+        RepairFlag repair = NoRepair,
+        const Owner & owner = {}) = 0;
 
     /**
      * Add a mapping indicating that `deriver!outputName` maps to the output path
@@ -537,7 +557,8 @@ public:
     virtual void buildPaths(
         const std::vector<DerivedPath> & paths,
         BuildMode buildMode = bmNormal,
-        std::shared_ptr<Store> evalStore = nullptr);
+        std::shared_ptr<Store> evalStore = nullptr,
+        const Owner & owner = {});
 
     /* Build a single non-materialized derivation (i.e. not from an
        on-disk .drv file).
@@ -578,7 +599,9 @@ public:
     /* Ensure that a path is valid.  If it is not currently valid, it
        may be made valid by running a substitute (if defined for the
        path). */
-    virtual void ensurePath(const StorePath & path);
+    virtual void ensurePath(
+        const StorePath & path,
+        const Owner & owner = {});
 
     /* Add a store path as a temporary root of the garbage collector.
        The root disappears as soon as we exit. */
@@ -652,10 +675,14 @@ public:
 
     /* Read a derivation, after ensuring its existence through
        ensurePath(). */
-    Derivation derivationFromPath(const StorePath & drvPath);
+    Derivation derivationFromPath(
+        const StorePath & drvPath,
+        const Owner & owner = {});
 
     /* Read a derivation (which must already be valid). */
-    Derivation readDerivation(const StorePath & drvPath);
+    Derivation readDerivation(
+        const StorePath & drvPath,
+        const Owner & owner = {});
 
     /* Read a derivation from a potentially invalid path. */
     Derivation readInvalidDerivation(const StorePath & drvPath);
@@ -778,6 +805,19 @@ protected:
         throw Unsupported("operation '%s' is not supported by store '%s'", op, getUri());
     }
 
+public:
+
+    void requireAccess(
+        const StorePath & storePath,
+        const Owner & owner);
+
+    virtual void grantAccess(
+        const StorePath & path,
+        const Owner & owner);
+
+    virtual void removeAccess(
+        const StorePath & path,
+        const StoreUser & owner);
 };
 
 
@@ -787,7 +827,8 @@ void copyStorePath(
     Store & dstStore,
     const StorePath & storePath,
     RepairFlag repair = NoRepair,
-    CheckSigsFlag checkSigs = CheckSigs);
+    CheckSigsFlag checkSigs = CheckSigs,
+    const Owner & dstOwner = {});
 
 
 /* Copy store paths from one store to another. The paths may be copied

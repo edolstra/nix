@@ -1,5 +1,6 @@
 #pragma once
 
+#include "store-types.hh"
 #include "path.hh"
 #include "types.hh"
 #include "hash.hh"
@@ -150,15 +151,12 @@ struct Derivation : BasicDerivation
 };
 
 
-class Store;
-
-enum RepairFlag : bool { NoRepair = false, Repair = true };
-
 /* Write a derivation to the Nix store, and return its path. */
 StorePath writeDerivation(Store & store,
     const Derivation & drv,
     RepairFlag repair = NoRepair,
-    bool readOnly = false);
+    bool readOnly = false,
+    const Owner & owner = {});
 
 /* Read a derivation from a file. */
 Derivation parseDerivation(const Store & store, std::string && s, std::string_view name);

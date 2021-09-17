@@ -141,14 +141,28 @@ public:
     bool pathInfoIsUntrusted(const ValidPathInfo &) override;
     bool realisationIsUntrusted(const Realisation & ) override;
 
-    void addToStore(const ValidPathInfo & info, Source & source,
-        RepairFlag repair, CheckSigsFlag checkSigs) override;
+    void addToStore(
+        const ValidPathInfo & info,
+        Source & source,
+        RepairFlag repair,
+        CheckSigsFlag checkSigs,
+        const Owner & owner) override;
 
-    StorePath addToStoreFromDump(Source & dump, const string & name,
-        FileIngestionMethod method, HashType hashAlgo, RepairFlag repair, const StorePathSet & references) override;
+    StorePath addToStoreFromDump(
+        Source & dump,
+        const string & name,
+        FileIngestionMethod method,
+        HashType hashAlgo,
+        RepairFlag repair,
+        const StorePathSet & references,
+        const Owner & owner) override;
 
-    StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair) override;
+    StorePath addTextToStore(
+        const std::string & name,
+        const std::string & s,
+        const StorePathSet & references,
+        RepairFlag repair,
+        const Owner & owner) override;
 
     void addTempRoot(const StorePath & path) override;
 
@@ -172,9 +186,10 @@ public:
 
     void optimiseStore() override;
 
-    /* Optimise a single store path. Optionally, test the encountered
-       symlinks for corruption. */
-    void optimisePath(const Path & path, RepairFlag repair);
+    /* If auto-optimisation is enabled, optimise a single store
+       path. Optionally, test the encountered symlinks for
+       corruption. */
+    void maybeOptimisePath(const StorePath & path, RepairFlag repair);
 
     bool verifyStore(bool checkContents, RepairFlag repair) override;
 
@@ -256,7 +271,8 @@ private:
 
     InodeHash loadInodeHash();
     Strings readDirectoryIgnoringInodes(const Path & path, const InodeHash & inodeHash);
-    void optimisePath_(Activity * act, OptimiseStats & stats, const Path & path, InodeHash & inodeHash, RepairFlag repair);
+
+    void optimisePath(Activity * act, OptimiseStats & stats, const Path & path, InodeHash & inodeHash, RepairFlag repair);
 
     // Internal versions that are not wrapped in retry_sqlite.
     bool isValidPath_(State & state, const StorePath & path);
@@ -284,6 +300,12 @@ private:
 
     void addBuildLog(const StorePath & drvPath, std::string_view log) override;
 
+    void grantAccess(const StorePath & path, const Owner & owner) override;
+
+    void removeAccess(
+        const StorePath & path,
+        const StoreUser & owner) override;
+
     friend struct LocalDerivationGoal;
     friend struct PathSubstitutionGoal;
     friend struct SubstitutionGoal;
@@ -303,8 +325,15 @@ typedef set<Inode> InodesSeen;
      without execute permission; setuid bits etc. are cleared)
    - the owner and group are set to the Nix user and group, if we're
      running as root. */
-void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & inodesSeen);
-void canonicalisePathMetaData(const Path & path, uid_t fromUid);
+void canonicalisePathMetaData(
+    const Path & path,
+    uid_t fromUid,
+    const Owner & owner,
+    InodesSeen & inodesSeen);
+void canonicalisePathMetaData(
+    const Path & path,
+    uid_t fromUid,
+    const Owner & owner);
 
 void canonicaliseTimestampAndPermissions(const Path & path);
 

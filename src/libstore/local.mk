@@ -10,7 +10,7 @@ libstore_LIBS = libutil
 
 libstore_LDFLAGS += $(SQLITE3_LIBS) $(LIBCURL_LIBS) $(SODIUM_LIBS) -pthread
 ifdef HOST_LINUX
- libstore_LDFLAGS += -ldl
+ libstore_LDFLAGS += -ldl -lacl
 endif
 
 ifdef HOST_DARWIN

@@ -86,8 +86,12 @@ bool BasicDerivation::isBuiltin() const
 }
 
 
-StorePath writeDerivation(Store & store,
-    const Derivation & drv, RepairFlag repair, bool readOnly)
+StorePath writeDerivation(
+    Store & store,
+    const Derivation & drv,
+    RepairFlag repair,
+    bool readOnly,
+    const Owner & owner)
 {
     auto references = drv.inputSrcs;
     for (auto & i : drv.inputDrvs)
@@ -99,7 +103,7 @@ StorePath writeDerivation(Store & store,
     auto contents = drv.unparse(store, false);
     return readOnly || settings.readOnlyMode
         ? store.computeStorePathForText(suffix, contents, references)
-        : store.addTextToStore(suffix, contents, references, repair);
+        : store.addTextToStore(suffix, contents, references, repair, owner);
 }
 
 

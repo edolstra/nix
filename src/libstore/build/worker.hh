@@ -132,7 +132,14 @@ public:
        it answers with "decline-permanently", we don't try again. */
     bool tryBuildHook = true;
 
-    Worker(Store & store, Store & evalStore);
+    /* If set, the user who will have access to the resulting
+       paths. If unset, the resulting paths will be public. */
+    const Owner owner;
+
+    Worker(
+        Store & store,
+        Store & evalStore,
+        const Owner & owner);
     ~Worker();
 
     /* Make a goal (with caching). */

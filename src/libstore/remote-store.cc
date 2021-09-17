@@ -111,6 +111,45 @@ void write(const Store & store, Sink & out, const std::optional<ContentAddress> 
     out << (caOpt ? renderContentAddress(*caOpt) : "");
 }
 
+
+StoreUser read(const Store & store, Source & from, Phantom<StoreUser> _)
+{
+    switch (readInt(from)) {
+    case 1:
+        return StoreUser { .userName = readString(from) };
+    default:
+        throw Error("unsupported user type from remote side");
+    }
+}
+
+void write(const Store & store, Sink & sink, const StoreUser & user)
+{
+    sink << 1 << user.userName;
+}
+
+
+Owner read(const Store & store, Source & from, Phantom<Owner> _)
+{
+    switch (readInt(from)) {
+    case 0:
+        return {};
+    case 1:
+        return read(store, from, Phantom<StoreUser> {});
+    default:
+        throw Error("unsupported optional tag from remote side");
+    }
+}
+
+void write(const Store & store, Sink & sink, const Owner & owner)
+{
+    if (owner) {
+        sink << 1;
+        write(store, sink, *owner);
+    } else
+        sink << 0;
+}
+
+
 }
 
 
@@ -498,12 +537,20 @@ std::optional<StorePath> RemoteStore::queryPathFromHashPart(const std::string & 
 }
 
 
+static void assertNoOwner(const Owner & owner)
+{
+    if (owner)
+        throw Error("the Nix daemon is too old to support private paths");
+}
+
+
 ref<const ValidPathInfo> RemoteStore::addCAToStore(
     Source & dump,
     const string & name,
     ContentAddressMethod caMethod,
     const StorePathSet & references,
-    RepairFlag repair)
+    RepairFlag repair,
+    const Owner & owner)
 {
     std::optional<ConnectionHandle> conn_(getConnection());
     auto & conn = *conn_;
@@ -516,6 +563,10 @@ ref<const ValidPathInfo> RemoteStore::addCAToStore(
             << renderContentAddressMethod(caMethod);
         worker_proto::write(*this, conn->to, references);
         conn->to << repair;
+        if (GET_PROTOCOL_MINOR(conn->daemonVersion) >= 33)
+            worker_proto::write(*this, conn->to, owner);
+        else
+            assertNoOwner(owner);
 
         // The dump source may invoke the store, so we need to make some room.
         connections->incCapacity();
@@ -531,6 +582,8 @@ ref<const ValidPathInfo> RemoteStore::addCAToStore(
     }
     else {
         if (repair) throw Error("repairing is not supported when building through the Nix daemon protocol < 1.25");
+
+        assertNoOwner(owner);
 
         std::visit(overloaded {
             [&](const TextHashMethod & thm) -> void {
@@ -582,16 +635,32 @@ ref<const ValidPathInfo> RemoteStore::addCAToStore(
 }
 
 
-StorePath RemoteStore::addToStoreFromDump(Source & dump, const string & name,
-      FileIngestionMethod method, HashType hashType, RepairFlag repair, const StorePathSet & references)
+StorePath RemoteStore::addToStoreFromDump(
+    Source & dump,
+    const string & name,
+    FileIngestionMethod method,
+    HashType hashType,
+    RepairFlag repair,
+    const StorePathSet & references,
+    const Owner & owner)
 {
-    return addCAToStore(dump, name, FixedOutputHashMethod{ .fileIngestionMethod = method, .hashType = hashType }, references, repair)->path;
+    return addCAToStore(
+        dump, name,
+        FixedOutputHashMethod{ .fileIngestionMethod = method, .hashType = hashType },
+        references, repair, owner)->path;
 }
 
 
-void RemoteStore::addToStore(const ValidPathInfo & info, Source & source,
-    RepairFlag repair, CheckSigsFlag checkSigs)
+void RemoteStore::addToStore(
+    const ValidPathInfo & info,
+    Source & source,
+    RepairFlag repair,
+    CheckSigsFlag checkSigs,
+    const Owner & owner)
 {
+    if (owner)
+        throw UnimplementedError("RemoteStore::addToStore() with owner");
+
     auto conn(getConnection());
 
     if (GET_PROTOCOL_MINOR(conn->daemonVersion) < 18) {
@@ -661,11 +730,15 @@ void RemoteStore::addMultipleToStore(
 }
 
 
-StorePath RemoteStore::addTextToStore(const string & name, const string & s,
-    const StorePathSet & references, RepairFlag repair)
+StorePath RemoteStore::addTextToStore(
+    const std::string & name,
+    const std::string & s,
+    const StorePathSet & references,
+    RepairFlag repair,
+    const Owner & owner)
 {
     StringSource source(s);
-    return addCAToStore(source, name, TextHashMethod{}, references, repair)->path;
+    return addCAToStore(source, name, TextHashMethod{}, references, repair, owner)->path;
 }
 
 void RemoteStore::registerDrvOutput(const Realisation & info)
@@ -742,7 +815,11 @@ static void writeDerivedPaths(RemoteStore & store, ConnectionHandle & conn, cons
     }
 }
 
-void RemoteStore::buildPaths(const std::vector<DerivedPath> & drvPaths, BuildMode buildMode, std::shared_ptr<Store> evalStore)
+void RemoteStore::buildPaths(
+    const std::vector<DerivedPath> & drvPaths,
+    BuildMode buildMode,
+    std::shared_ptr<Store> evalStore,
+    const Owner & owner)
 {
     if (evalStore && evalStore.get() != this) {
         /* The remote doesn't have a way to access evalStore, so copy
@@ -765,6 +842,10 @@ void RemoteStore::buildPaths(const std::vector<DerivedPath> & drvPaths, BuildMod
            need to validate it here on the client side.  */
         if (buildMode != bmNormal)
             throw Error("repairing or checking is not supported when building through the Nix daemon");
+    if (GET_PROTOCOL_MINOR(conn->daemonVersion) >= 33)
+        worker_proto::write(*this, conn->to, owner);
+    else
+        assertNoOwner(owner);
     conn.processStderr();
     readInt(conn->from);
 }
@@ -792,8 +873,13 @@ BuildResult RemoteStore::buildDerivation(const StorePath & drvPath, const BasicD
 }
 
 
-void RemoteStore::ensurePath(const StorePath & path)
+void RemoteStore::ensurePath(
+    const StorePath & path,
+    const Owner & owner)
 {
+    if (owner)
+        throw UnimplementedError("RemoteStore::ensurePaths() with owner");
+
     auto conn(getConnection());
     conn->to << wopEnsurePath << printStorePath(path);
     conn.processStderr();

@@ -4,6 +4,7 @@
 #include "path.hh"
 #include "hash.hh"
 #include "content-address.hh"
+#include "store-types.hh"
 
 #include <string>
 #include <optional>
@@ -41,6 +42,13 @@ struct ValidPathInfo
     bool ultimate = false;
 
     StringSet sigs; // note: not necessarily verified
+
+    /* The users who have access to the path. If unset, the path is
+       public. */
+    std::optional<std::set<StoreUser>> owners;
+
+    // FIXME: ultimate, sigs, and owners are mutable so we should
+    // probably move them into a separate type.
 
     /* If non-empty, an assertion that the path is content-addressed,
        i.e., that the store path is computed from a cryptographic hash

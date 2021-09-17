@@ -39,12 +39,20 @@ struct DummyStore : public virtual DummyStoreConfig, public virtual Store
     std::optional<StorePath> queryPathFromHashPart(const std::string & hashPart) override
     { unsupported("queryPathFromHashPart"); }
 
-    void addToStore(const ValidPathInfo & info, Source & source,
-        RepairFlag repair, CheckSigsFlag checkSigs) override
+    void addToStore(
+        const ValidPathInfo & info,
+        Source & source,
+        RepairFlag repair,
+        CheckSigsFlag checkSigs,
+        const Owner & owner) override
     { unsupported("addToStore"); }
 
-    StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair) override
+    StorePath addTextToStore(
+        const std::string & name,
+        const std::string & s,
+        const StorePathSet & references,
+        RepairFlag repair,
+        const Owner & owner) override
     { unsupported("addTextToStore"); }
 
     void narFromPath(const StorePath & path, Sink & sink) override

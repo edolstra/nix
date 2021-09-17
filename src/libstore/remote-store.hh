@@ -69,34 +69,55 @@ public:
         const string & name,
         ContentAddressMethod caMethod,
         const StorePathSet & references,
-        RepairFlag repair);
+        RepairFlag repair,
+        const Owner & owner = {});
 
     /* Add a content-addressable store path. Does not support references. `dump` will be drained. */
-    StorePath addToStoreFromDump(Source & dump, const string & name,
-        FileIngestionMethod method = FileIngestionMethod::Recursive, HashType hashAlgo = htSHA256, RepairFlag repair = NoRepair, const StorePathSet & references = StorePathSet()) override;
+    StorePath addToStoreFromDump(
+        Source & dump,
+        const string & name,
+        FileIngestionMethod method,
+        HashType hashAlgo,
+        RepairFlag repair,
+        const StorePathSet & references,
+        const Owner & owner) override;
 
-    void addToStore(const ValidPathInfo & info, Source & nar,
-        RepairFlag repair, CheckSigsFlag checkSigs) override;
+    void addToStore(
+        const ValidPathInfo & info,
+        Source & nar,
+        RepairFlag repair,
+        CheckSigsFlag checkSigs,
+        const Owner & owner) override;
 
     void addMultipleToStore(
         Source & source,
         RepairFlag repair,
         CheckSigsFlag checkSigs) override;
 
-    StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair) override;
+    StorePath addTextToStore(
+        const std::string & name,
+        const std::string & s,
+        const StorePathSet & references,
+        RepairFlag repair,
+        const Owner & owner) override;
 
     void registerDrvOutput(const Realisation & info) override;
 
     void queryRealisationUncached(const DrvOutput &,
         Callback<std::shared_ptr<const Realisation>> callback) noexcept override;
 
-    void buildPaths(const std::vector<DerivedPath> & paths, BuildMode buildMode, std::shared_ptr<Store> evalStore) override;
+    void buildPaths(
+        const std::vector<DerivedPath> & paths,
+        BuildMode buildMode,
+        std::shared_ptr<Store> evalStore,
+        const Owner & owner) override;
 
     BuildResult buildDerivation(const StorePath & drvPath, const BasicDerivation & drv,
         BuildMode buildMode) override;
 
-    void ensurePath(const StorePath & path) override;
+    void ensurePath(
+        const StorePath & path,
+        const Owner & owner = {}) override;
 
     void addTempRoot(const StorePath & path) override;
 

@@ -371,6 +371,9 @@ struct InstallableStorePath : Installable
     DerivedPaths toDerivedPaths() override
     {
         if (storePath.isDerivation()) {
+            // FIXME: this makes 'nix path-info --derivation' fail if
+            // we don't have access, even though we don't need the
+            // output names.
             auto drv = store->readDerivation(storePath);
             return {
                 DerivedPath::Built {
@@ -800,7 +803,7 @@ BuiltPaths build(
     if (mode == Realise::Nothing || mode == Realise::Derivation)
         printMissing(store, pathsToBuild, lvlError);
     else if (mode == Realise::Outputs)
-        store->buildPaths(pathsToBuild, bMode, evalStore);
+        store->buildPaths(pathsToBuild, bMode, evalStore, settings.getOwner());
 
     return getBuiltPaths(evalStore, store, pathsToBuild);
 }

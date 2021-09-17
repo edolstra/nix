@@ -95,18 +95,38 @@ public:
     std::optional<StorePath> queryPathFromHashPart(const std::string & hashPart) override
     { unsupported("queryPathFromHashPart"); }
 
-    void addToStore(const ValidPathInfo & info, Source & narSource,
-        RepairFlag repair, CheckSigsFlag checkSigs) override;
+    void addToStore(
+        const ValidPathInfo & info,
+        Source & narSource,
+        RepairFlag repair,
+        CheckSigsFlag checkSigs,
+        const Owner & owner) override;
 
-    StorePath addToStoreFromDump(Source & dump, const string & name,
-        FileIngestionMethod method, HashType hashAlgo, RepairFlag repair, const StorePathSet & references ) override;
+    StorePath addToStoreFromDump(
+        Source & dump,
+        const string & name,
+        FileIngestionMethod method,
+        HashType hashAlgo,
+        RepairFlag repair,
+        const StorePathSet & references,
+        const Owner & owner) override;
 
-    StorePath addToStore(const string & name, const Path & srcPath,
-        FileIngestionMethod method, HashType hashAlgo,
-        PathFilter & filter, RepairFlag repair, const StorePathSet & references) override;
+    StorePath addToStore(
+        const string & name,
+        const Path & srcPath,
+        FileIngestionMethod method,
+        HashType hashAlgo,
+        PathFilter & filter,
+        RepairFlag repair,
+        const StorePathSet & references,
+        const Owner & owner) override;
 
-    StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair) override;
+    StorePath addTextToStore(
+        const std::string & name,
+        const std::string & s,
+        const StorePathSet & references,
+        RepairFlag repair,
+        const Owner & owner) override;
 
     void registerDrvOutput(const Realisation & info) override;
 

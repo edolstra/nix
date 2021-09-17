@@ -37,6 +37,8 @@ void PathSubstitutionGoal::init()
     worker.store.addTempRoot(storePath);
 
     /* If the path already exists we're done. */
+    // FIXME: handle the case where the path exists but isn't
+    // accessible to 'owner'.
     if (!repair && worker.store.isValidPath(storePath)) {
         amDone(ecSuccess);
         return;
@@ -204,8 +206,13 @@ void PathSubstitutionGoal::tryToRun()
             Activity act(*logger, actSubstitute, Logger::Fields{worker.store.printStorePath(storePath), sub->getUri()});
             PushActivity pact(act.id);
 
-            copyStorePath(*sub, worker.store,
-                subPath ? *subPath : storePath, repair, sub->isTrusted ? NoCheckSigs : CheckSigs);
+            // FIXME: handle ACLs when repairing.
+            copyStorePath(*sub,
+                worker.store,
+                subPath ? *subPath : storePath,
+                repair,
+                sub->isTrusted ? NoCheckSigs : CheckSigs,
+                worker.owner);
 
             promise.set_value();
         } catch (...) {

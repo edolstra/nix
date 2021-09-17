@@ -145,6 +145,10 @@ struct LocalDerivationGoal : public DerivationGoal
     /* Fill in the environment for the builder. */
     void initEnv();
 
+    /* Remove previously assigned temporary store path ACLs for the
+       build user. */
+    void removeAccess();
+
     /* Setup tmp dir location. */
     void initTmpDir();
 

@@ -241,15 +241,21 @@ static void daemonLoop()
                 //  Handle the connection.
                 FdSource from(remote.get());
                 FdSink to(remote.get());
-                processConnection(openUncachedStore(), from, to, trusted, NotRecursive, [&](Store & store) {
-#if 0
-                    /* Prevent users from doing something very dangerous. */
-                    if (geteuid() == 0 &&
-                        querySetting("build-users-group", "") == "")
-                        throw Error("if you run 'nix-daemon' as root, then you MUST set 'build-users-group'!");
-#endif
-                    store.createUser(user, peer.uid);
-                });
+                processConnection(
+                    openUncachedStore(),
+                    from, to,
+                    trusted,
+                    StoreUser { .userName = user },
+                    NotRecursive,
+                    [&](Store & store) {
+                        #if 0
+                        /* Prevent users from doing something very dangerous. */
+                        if (geteuid() == 0 &&
+                            querySetting("build-users-group", "") == "")
+                            throw Error("if you run 'nix-daemon' as root, then you MUST set 'build-users-group'!");
+                        #endif
+                        store.createUser(user, peer.uid);
+                    });
 
                 exit(0);
             }, options);
@@ -302,7 +308,7 @@ static void runDaemon(bool stdio)
             /* Auth hook is empty because in this mode we blindly trust the
                standard streams. Limiting access to those is explicitly
                not `nix-daemon`'s responsibility. */
-            processConnection(openUncachedStore(), from, to, Trusted, NotRecursive, [&](Store & _){});
+            processConnection(openUncachedStore(), from, to, Trusted, {}, NotRecursive, [&](Store & _){});
         }
     } else
         daemonLoop();

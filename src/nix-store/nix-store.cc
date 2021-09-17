@@ -63,9 +63,9 @@ static PathSet realisePath(StorePathWithOutputs path, bool build = true)
     auto store2 = std::dynamic_pointer_cast<LocalFSStore>(store);
 
     if (path.path.isDerivation()) {
-        if (build) store->buildPaths({path.toDerivedPath()});
+        if (build) store->buildPaths({path.toDerivedPath()}, bmNormal, nullptr, settings.getOwner());
         auto outputPaths = store->queryDerivationOutputMap(path.path);
-        Derivation drv = store->derivationFromPath(path.path);
+        Derivation drv = store->derivationFromPath(path.path, settings.getOwner());
         rootNr++;
 
         if (path.outputs.empty())
@@ -131,6 +131,8 @@ static void opRealise(Strings opFlags, Strings opArgs)
     for (auto & i : opArgs)
         paths.push_back(followLinksToStorePathWithOutputs(*store, i));
 
+    // FIXME: pass owner
+    #if 0
     uint64_t downloadSize, narSize;
     StorePathSet willBuild, willSubstitute, unknown;
     store->queryMissing(
@@ -147,11 +149,12 @@ static void opRealise(Strings opFlags, Strings opArgs)
 
     if (settings.printMissing)
         printMissing(ref<Store>(store), willBuild, willSubstitute, unknown, downloadSize, narSize);
+    #endif
 
     if (dryRun) return;
 
     /* Build all paths at the same time to exploit parallelism. */
-    store->buildPaths(toDerivedPaths(paths), buildMode);
+    store->buildPaths(toDerivedPaths(paths), buildMode, nullptr, settings.getOwner());
 
     if (!ignoreUnknown)
         for (auto & i : paths) {
@@ -219,7 +222,7 @@ static StorePathSet maybeUseOutputs(const StorePath & storePath, bool useOutput,
 {
     if (forceRealise) realisePath({storePath});
     if (useOutput && storePath.isDerivation()) {
-        auto drv = store->derivationFromPath(storePath);
+        auto drv = store->derivationFromPath(storePath, settings.getOwner());
         StorePathSet outputs;
         if (forceRealise)
             return store->queryDerivationOutputs(storePath);
@@ -363,7 +366,7 @@ static void opQuery(Strings opFlags, Strings opArgs)
         case qBinding:
             for (auto & i : opArgs) {
                 auto path = useDeriver(store->followLinksToStorePath(i));
-                Derivation drv = store->derivationFromPath(path);
+                Derivation drv = store->derivationFromPath(path, settings.getOwner());
                 StringPairs::iterator j = drv.env.find(bindingName);
                 if (j == drv.env.end())
                     throw Error("derivation '%s' has no environment binding named '%s'",
@@ -447,7 +450,7 @@ static void opPrintEnv(Strings opFlags, Strings opArgs)
     if (opArgs.size() != 1) throw UsageError("'--print-env' requires one derivation store path");
 
     Path drvPath = opArgs.front();
-    Derivation drv = store->derivationFromPath(store->parseStorePath(drvPath));
+    Derivation drv = store->derivationFromPath(store->parseStorePath(drvPath), settings.getOwner());
 
     /* Print each environment variable in the derivation in a format
      * that can be sourced by the shell. */
@@ -509,7 +512,7 @@ static void registerValidity(bool reregister, bool hashGiven, bool canonicalise)
         if (!store->isValidPath(info->path) || reregister) {
             /* !!! races */
             if (canonicalise)
-                canonicalisePathMetaData(store->printStorePath(info->path), -1);
+                canonicalisePathMetaData(store->printStorePath(info->path), -1, {}); // FIXME
             if (!hashGiven) {
                 HashResult hash = hashPath(htSHA256, store->printStorePath(info->path));
                 info->narHash = hash.first;
@@ -885,7 +888,7 @@ static void opServe(Strings opFlags, Strings opArgs)
 
                 try {
                     MonitorFdHup monitor(in.fd);
-                    store->buildPaths(toDerivedPaths(paths));
+                    store->buildPaths(toDerivedPaths(paths), bmNormal, nullptr, settings.getOwner());
                     out << 0;
                 } catch (Error & e) {
                     assert(e.status);

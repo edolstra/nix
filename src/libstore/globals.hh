@@ -4,6 +4,7 @@
 #include "config.hh"
 #include "util.hh"
 #include "experimental-features.hh"
+#include "store-types.hh"
 
 #include <map>
 #include <limits>
@@ -973,6 +974,10 @@ public:
           The commit summary to use when committing changed flake lock files. If
           empty, the summary is generated based on the action performed.
         )"};
+
+    Setting<std::string> owner{this, "", "owner", "TODO"};
+
+    Owner getOwner();
 };
 
 

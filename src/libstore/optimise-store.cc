@@ -87,12 +87,15 @@ Strings LocalStore::readDirectoryIgnoringInodes(const Path & path, const InodeHa
 }
 
 
-void LocalStore::optimisePath_(Activity * act, OptimiseStats & stats,
+void LocalStore::optimisePath(Activity * act, OptimiseStats & stats,
     const Path & path, InodeHash & inodeHash, RepairFlag repair)
 {
     checkInterrupt();
 
     auto st = lstat(path);
+
+    /* If this is a private path, skip it. */
+    if (!(st.st_mode & S_IROTH)) return;
 
 #if __APPLE__
     /* HFS/macOS has some undocumented security feature disabling hardlinking for
@@ -110,7 +113,7 @@ void LocalStore::optimisePath_(Activity * act, OptimiseStats & stats,
     if (S_ISDIR(st.st_mode)) {
         Strings names = readDirectoryIgnoringInodes(path, inodeHash);
         for (auto & i : names)
-            optimisePath_(act, stats, path + "/" + i, inodeHash, repair);
+            optimisePath(act, stats, path + "/" + i, inodeHash, repair);
         return;
     }
 
@@ -191,6 +194,9 @@ void LocalStore::optimisePath_(Activity * act, OptimiseStats & stats,
         }
     }
 
+    // FIXME: take the ACLs into account. If we merge two files, we
+    // have to merge their ACLs.
+
     /* Yes!  We've seen a file with the same contents.  Replace the
        current file with a hard link to that file. */
     auto stLink = lstat(linkPath);
@@ -268,7 +274,7 @@ void LocalStore::optimiseStore(OptimiseStats & stats)
         if (!isValidPath(i)) continue; /* path was GC'ed, probably */
         {
             Activity act(*logger, lvlTalkative, actUnknown, fmt("optimising path '%s'", printStorePath(i)));
-            optimisePath_(&act, stats, realStoreDir + "/" + std::string(i.to_string()), inodeHash, NoRepair);
+            optimisePath(&act, stats, Store::toRealPath(i), inodeHash, NoRepair);
         }
         done++;
         act.progress(done, paths.size());
@@ -286,13 +292,13 @@ void LocalStore::optimiseStore()
         stats.filesLinked);
 }
 
-void LocalStore::optimisePath(const Path & path, RepairFlag repair)
+void LocalStore::maybeOptimisePath(const StorePath & path, RepairFlag repair)
 {
-    OptimiseStats stats;
-    InodeHash inodeHash;
-
-    if (settings.autoOptimiseStore) optimisePath_(nullptr, stats, path, inodeHash, repair);
+    if (settings.autoOptimiseStore) {
+        OptimiseStats stats;
+        InodeHash inodeHash;
+        optimisePath(nullptr, stats, Store::toRealPath(path), inodeHash, repair);
+    }
 }
-
 
 }

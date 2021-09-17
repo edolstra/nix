@@ -181,6 +181,12 @@ bool Settings::isWSL1()
     return hasSuffix(utsbuf.release, "-Microsoft");
 }
 
+Owner Settings::getOwner()
+{
+    if (owner == "") return {};
+    return StoreUser { .userName = owner };
+}
+
 const string nixVersion = PACKAGE_VERSION;
 
 NLOHMANN_JSON_SERIALIZE_ENUM(SandboxMode, {

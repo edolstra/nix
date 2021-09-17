@@ -9,12 +9,16 @@
 
 namespace nix {
 
-Worker::Worker(Store & store, Store & evalStore)
+Worker::Worker(
+    Store & store,
+    Store & evalStore,
+    const Owner & owner)
     : act(*logger, actRealise)
     , actDerivations(*logger, actBuilds)
     , actSubstitutions(*logger, actCopyPaths)
     , store(store)
     , evalStore(evalStore)
+    , owner(owner)
 {
     /* Debugging: prevent recursive workers. */
     nrLocalBuilds = 0;
@@ -239,10 +243,13 @@ void Worker::run(const Goals & _topGoals)
         }
     }
 
+    // FIXME: pass owner
+    #if 0
     /* Call queryMissing() to efficiently query substitutes. */
     StorePathSet willBuild, willSubstitute, unknown;
     uint64_t downloadSize, narSize;
     store.queryMissing(topPaths, willBuild, willSubstitute, unknown, downloadSize, narSize);
+    #endif
 
     debug("entered goal loop");
 

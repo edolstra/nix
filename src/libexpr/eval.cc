@@ -2029,7 +2029,15 @@ string EvalState::copyPathToStore(PathSet & context, const Path & path)
     else {
         auto p = settings.readOnlyMode
             ? store->computeStorePathForPath(std::string(baseNameOf(path)), checkSourcePath(path)).first
-            : store->addToStore(std::string(baseNameOf(path)), checkSourcePath(path), FileIngestionMethod::Recursive, htSHA256, defaultPathFilter, repair);
+            : store->addToStore(
+                std::string(baseNameOf(path)),
+                checkSourcePath(path),
+                FileIngestionMethod::Recursive,
+                htSHA256,
+                defaultPathFilter,
+                repair,
+                {},
+                settings.getOwner());
         dstPath = store->printStorePath(p);
         allowPath(p);
         srcToStore.insert_or_assign(path, std::move(p));

@@ -157,10 +157,22 @@ struct LegacySSHStore : public virtual LegacySSHStoreConfig, public virtual Stor
         } catch (...) { callback.rethrow(); }
     }
 
-    void addToStore(const ValidPathInfo & info, Source & source,
-        RepairFlag repair, CheckSigsFlag checkSigs) override
+    void assertNoOwner(const Owner & owner)
+    {
+        if (owner)
+            throw Error("SSH stores do not support specifying an owner");
+    }
+
+    void addToStore(
+        const ValidPathInfo & info,
+        Source & source,
+        RepairFlag repair,
+        CheckSigsFlag checkSigs,
+        const Owner & owner) override
     {
         debug("adding path '%s' to remote host '%s'", printStorePath(info.path), host);
+
+        assertNoOwner(owner);
 
         auto conn(connections->get());
 
@@ -225,13 +237,23 @@ struct LegacySSHStore : public virtual LegacySSHStoreConfig, public virtual Stor
     std::optional<StorePath> queryPathFromHashPart(const std::string & hashPart) override
     { unsupported("queryPathFromHashPart"); }
 
-    StorePath addToStore(const string & name, const Path & srcPath,
-        FileIngestionMethod method, HashType hashAlgo,
-        PathFilter & filter, RepairFlag repair, const StorePathSet & references) override
+    StorePath addToStore(
+        const string & name,
+        const Path & srcPath,
+        FileIngestionMethod method,
+        HashType hashAlgo,
+        PathFilter & filter,
+        RepairFlag repair,
+        const StorePathSet & references,
+        const Owner & owner) override
     { unsupported("addToStore"); }
 
-    StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair) override
+    StorePath addTextToStore(
+        const std::string & name,
+        const std::string & s,
+        const StorePathSet & references,
+        RepairFlag repair,
+        const Owner & owner) override
     { unsupported("addTextToStore"); }
 
 private:
@@ -282,10 +304,16 @@ public:
         return status;
     }
 
-    void buildPaths(const std::vector<DerivedPath> & drvPaths, BuildMode buildMode, std::shared_ptr<Store> evalStore) override
+    void buildPaths(
+        const std::vector<DerivedPath> & drvPaths,
+        BuildMode buildMode,
+        std::shared_ptr<Store> evalStore,
+        const Owner & owner) override
     {
         if (evalStore && evalStore.get() != this)
             throw Error("building on an SSH store is incompatible with '--eval-store'");
+
+        assertNoOwner(owner);
 
         auto conn(connections->get());
 
@@ -317,7 +345,9 @@ public:
         }
     }
 
-    void ensurePath(const StorePath & path) override
+    void ensurePath(
+        const StorePath & path,
+        const Owner & owner = {}) override
     { unsupported("ensurePath"); }
 
     void computeFSClosure(const StorePathSet & paths,

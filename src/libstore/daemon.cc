@@ -261,10 +261,23 @@ static std::vector<DerivedPath> readDerivedPaths(Store & store, unsigned int cli
     return reqs;
 }
 
-static void performOp(TunnelLogger * logger, ref<Store> store,
-    TrustedFlag trusted, RecursiveFlag recursive, unsigned int clientVersion,
-    Source & from, BufferedSink & to, unsigned int op)
+static void performOp(
+    TunnelLogger * logger,
+    ref<Store> store,
+    TrustedFlag trusted,
+    const Owner & clientUser,
+    RecursiveFlag recursive,
+    unsigned int clientVersion,
+    Source & from,
+    BufferedSink & to,
+    unsigned int op)
 {
+    auto checkOwner = [&](const Owner & owner)
+    {
+        if (owner && !trusted && (!clientUser || clientUser->userName != owner->userName))
+            throw Error("you are not privileged to create or build paths as user '%s'", owner->userName);
+    };
+
     switch (op) {
 
     case wopIsValidPath: {
@@ -343,6 +356,7 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         break;
     }
 
+    // FIXME: remove
     case wopQueryDerivationOutputNames: {
         auto path = store->parseStorePath(readString(from));
         logger->startWork();
@@ -387,8 +401,13 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
             bool repairBool;
             from >> repairBool;
             auto repair = RepairFlag{repairBool};
+            auto owner =
+                GET_PROTOCOL_MINOR(clientVersion) >= 33
+                ? worker_proto::read(*store, from, Phantom<Owner> {})
+                : std::nullopt;
 
             logger->startWork();
+            checkOwner(owner);
             auto pathInfo = [&]() {
                 // NB: FramedSource must be out of scope before logger->stopWork();
                 ContentAddressMethod contentAddressMethod = parseContentAddressMethod(camStr);
@@ -398,11 +417,11 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
                     [&](TextHashMethod &) {
                         // We could stream this by changing Store
                         std::string contents = source.drain();
-                        auto path = store->addTextToStore(name, contents, refs, repair);
+                        auto path = store->addTextToStore(name, contents, refs, repair, owner);
                         return store->queryPathInfo(path);
                     },
                     [&](FixedOutputHashMethod & fohm) {
-                        auto path = store->addToStoreFromDump(source, name, fohm.fileIngestionMethod, fohm.hashType, repair, refs);
+                        auto path = store->addToStoreFromDump(source, name, fohm.fileIngestionMethod, fohm.hashType, repair, refs, owner);
                         return store->queryPathInfo(path);
                     },
                 }, contentAddressMethod);
@@ -494,6 +513,7 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         readInt(from); // obsolete
         logger->startWork();
         TunnelSink sink(to);
+        // FIXME: apply access control
         store->exportPath(path, sink);
         logger->stopWork();
         to << 1;
@@ -523,8 +543,13 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
             if (mode == bmRepair && !trusted)
                 throw Error("repairing is not allowed because you are not in 'trusted-users'");
         }
+        auto owner =
+            GET_PROTOCOL_MINOR(clientVersion) >= 33
+            ? worker_proto::read(*store, from, Phantom<Owner> {})
+            : std::nullopt;
         logger->startWork();
-        store->buildPaths(drvs, mode);
+        checkOwner(owner);
+        store->buildPaths(drvs, mode, nullptr, owner);
         logger->stopWork();
         to << 1;
         break;
@@ -769,6 +794,7 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         std::shared_ptr<const ValidPathInfo> info;
         logger->startWork();
         try {
+            // FIXME: apply access control?
             info = store->queryPathInfo(path);
         } catch (InvalidPath &) {
             if (GET_PROTOCOL_MINOR(clientVersion) < 17) throw;
@@ -820,6 +846,7 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         auto path = store->parseStorePath(readString(from));
         logger->startWork();
         logger->stopWork();
+        // FIXME: check ACL
         dumpPath(store->toRealPath(path), to);
         break;
     }
@@ -948,6 +975,7 @@ void processConnection(
     FdSource & from,
     FdSink & to,
     TrustedFlag trusted,
+    const Owner & clientUser,
     RecursiveFlag recursive,
     std::function<void(Store &)> authHook)
 {
@@ -1015,7 +1043,7 @@ void processConnection(
             opCount++;
 
             try {
-                performOp(tunnelLogger, store, trusted, recursive, clientVersion, from, to, op);
+                performOp(tunnelLogger, store, trusted, clientUser, recursive, clientVersion, from, to, op);
             } catch (Error & e) {
                 /* If we're not in a state where we can send replies, then
                    something went wrong processing the input of the

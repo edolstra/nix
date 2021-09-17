@@ -13,6 +13,7 @@ void processConnection(
     FdSource & from,
     FdSink & to,
     TrustedFlag trusted,
+    const Owner & clientUser,
     RecursiveFlag recursive,
     /* Arbitrary hook to check authorization / initialize user data / whatever
        after the protocol has been negotiated. The idea is that this function

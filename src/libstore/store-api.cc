@@ -236,8 +236,15 @@ StorePath Store::computeStorePathForText(const string & name, const string & s,
 }
 
 
-StorePath Store::addToStore(const string & name, const Path & _srcPath,
-    FileIngestionMethod method, HashType hashAlgo, PathFilter & filter, RepairFlag repair, const StorePathSet & references)
+StorePath Store::addToStore(
+    const string & name,
+    const Path & _srcPath,
+    FileIngestionMethod method,
+    HashType hashAlgo,
+    PathFilter & filter,
+    RepairFlag repair,
+    const StorePathSet & references,
+    const Owner & owner)
 {
     Path srcPath(absPath(_srcPath));
     auto source = sinkToSource([&](Sink & sink) {
@@ -246,7 +253,7 @@ StorePath Store::addToStore(const string & name, const Path & _srcPath,
         else
             readFile(srcPath, sink);
     });
-    return addToStoreFromDump(*source, name, method, hashAlgo, repair, references);
+    return addToStoreFromDump(*source, name, method, hashAlgo, repair, references, owner);
 }
 
 
@@ -816,6 +823,12 @@ void Store::pathInfoToJSON(JSONPlaceholder & jsonOut, const StorePathSet & store
                     if (showClosureSize)
                         jsonPath.attr("closureDownloadSize", closureSizes.second);
                 }
+
+                if (info->owners) {
+                    auto jsonOwners = jsonPath.list("owners");
+                    for (auto & owner : *info->owners)
+                        jsonOwners.elem(owner.userName);
+                }
             }
 
         } catch (InvalidPath &) {
@@ -870,7 +883,8 @@ void copyStorePath(
     Store & dstStore,
     const StorePath & storePath,
     RepairFlag repair,
-    CheckSigsFlag checkSigs)
+    CheckSigsFlag checkSigs,
+    const Owner & dstOwner)
 {
     auto srcUri = srcStore.getUri();
     auto dstUri = dstStore.getUri();
@@ -910,7 +924,7 @@ void copyStorePath(
            throw EndOfFile("NAR for '%s' fetched from '%s' is incomplete", srcStore.printStorePath(storePath), srcStore.getUri());
     });
 
-    dstStore.addToStore(*info, *source, repair, checkSigs);
+    dstStore.addToStore(*info, *source, repair, checkSigs, dstOwner);
 }
 
 
@@ -1246,13 +1260,18 @@ Strings ValidPathInfo::shortRefs() const
 }
 
 
-Derivation Store::derivationFromPath(const StorePath & drvPath)
+Derivation Store::derivationFromPath(
+    const StorePath & drvPath,
+    const Owner & owner)
 {
-    ensurePath(drvPath);
-    return readDerivation(drvPath);
+    ensurePath(drvPath, owner);
+    return readDerivation(drvPath, owner);
 }
 
-Derivation readDerivationCommon(Store& store, const StorePath& drvPath, bool requireValidPath)
+static Derivation readDerivationCommon(
+    Store & store,
+    const StorePath & drvPath,
+    bool requireValidPath)
 {
     auto accessor = store.getFSAccessor();
     try {
@@ -1264,11 +1283,44 @@ Derivation readDerivationCommon(Store& store, const StorePath& drvPath, bool req
     }
 }
 
-Derivation Store::readDerivation(const StorePath & drvPath)
-{ return readDerivationCommon(*this, drvPath, true); }
+Derivation Store::readDerivation(
+    const StorePath & drvPath,
+    const Owner & owner)
+{
+    requireAccess(drvPath, owner);
+    return readDerivationCommon(*this, drvPath, true);
+}
 
 Derivation Store::readInvalidDerivation(const StorePath & drvPath)
-{ return readDerivationCommon(*this, drvPath, false); }
+{
+    return readDerivationCommon(*this, drvPath, false);
+}
+
+
+void Store::requireAccess(
+    const StorePath & storePath,
+    const Owner & owner)
+{
+    auto info = queryPathInfo(storePath);
+    if (info->owners && (!owner || !info->owners->count(*owner)))
+        throw Error("you do not have access to private store path '%s'", printStorePath(storePath));
+}
+
+
+void Store::grantAccess(
+    const StorePath & path,
+    const Owner & owner)
+{
+    if (owner)
+        throw Error("store '%s' does not support access control", getUri());
+}
+
+void Store::removeAccess(
+    const StorePath & path,
+    const StoreUser & owner)
+{
+    throw Error("store '%s' does not support access control", getUri());
+}
 
 }
 

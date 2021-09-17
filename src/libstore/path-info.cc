@@ -21,6 +21,10 @@ ValidPathInfo ValidPathInfo::read(Source & source, const Store & store, unsigned
         info.sigs = readStrings<StringSet>(source);
         info.ca = parseContentAddressOpt(readString(source));
     }
+    if (format >= 33) {
+        if (readInt(source))
+            info.owners = worker_proto::read(store, source, Phantom<std::set<StoreUser>> {});
+    }
     return info;
 }
 
@@ -40,6 +44,11 @@ void ValidPathInfo::write(
         sink << ultimate
              << sigs
              << renderContentAddress(ca);
+    }
+    if (format >= 33) {
+        sink << (bool) owners;
+        if (owners)
+            worker_proto::write(store, sink, *owners);
     }
 }
 

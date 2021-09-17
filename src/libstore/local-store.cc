@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <grp.h>
+#include <pwd.h>
 
 #if __linux__
 #include <sched.h>
@@ -33,6 +34,8 @@
 #include <sys/mount.h>
 #include <sys/ioctl.h>
 #include <sys/xattr.h>
+#include <sys/acl.h>
+#include <acl/libacl.h>
 #endif
 
 #ifdef __CYGWIN__
@@ -524,20 +527,198 @@ void LocalStore::makeStoreWritable()
 }
 
 
+static uid_t userToUid(const std::string & user)
+{
+    // FIXME: cache
+    auto pw = getpwnam(user.c_str());
+    if (!pw)
+        throw Error("the user '%s' does not exist", user);
+    return pw->pw_uid;
+}
+
+static void addPerm(acl_entry_t & entry, bool executable)
+{
+    acl_permset_t permset;
+    acl_get_permset(entry, &permset);
+
+    if (acl_clear_perms(permset) == -1)
+        throw SysError("cannot clear ACL permission set");
+
+    if (acl_add_perm(permset, ACL_READ) == -1)
+        throw SysError("cannot add to ACL permission set");
+
+    if (executable && acl_add_perm(permset, ACL_EXECUTE) == -1)
+        throw SysError("cannot add to ACL permission set");
+}
+
+// FIXME: remove 'executable'.
+static void addOwner(const Path & path, const StoreUser & owner, bool executable)
+{
+    auto acl = acl_get_file(path.c_str(), ACL_TYPE_ACCESS);
+    if (!acl)
+        throw SysError("cannot get ACL on '%s'", path);
+
+    Finally cleanup{[&]() { acl_free(acl); }};
+
+    acl_entry_t entry;
+    if (acl_create_entry(&acl, &entry) == -1)
+        throw SysError("cannot create ACL entry");
+
+    if (acl_set_tag_type(entry, ACL_USER) == -1)
+        throw SysError("cannot set ACL entry tag type");
+
+    uid_t uid = userToUid(owner.userName);
+    if (acl_set_qualifier(entry, &uid) == -1)
+        throw SysError("cannot set ACL entry qualifier");
+
+    addPerm(entry, executable);
+
+    if (acl_calc_mask(&acl) == -1)
+        throw SysError("cannot calculate ACL mask");
+
+    if (acl_set_file(path.c_str(), ACL_TYPE_ACCESS, acl) == -1)
+        throw SysError("cannot set ACL on '%s'", path);
+}
+
+static void removeOwner(const Path & path, const StoreUser & owner)
+{
+    auto acl = acl_get_file(path.c_str(), ACL_TYPE_ACCESS);
+    if (!acl)
+        throw SysError("cannot get ACL on '%s'", path);
+
+    Finally cleanup{[&]() { acl_free(acl); }};
+
+    uid_t uid = userToUid(owner.userName);
+
+    acl_entry_t entry;
+    int entry_id = ACL_FIRST_ENTRY;
+
+    while (true) {
+        auto res = acl_get_entry(acl, entry_id, &entry);
+        entry_id = ACL_NEXT_ENTRY;
+        if (res == 0) break;
+        if (res != 1)
+            throw SysError("cannot get ACL entry");
+
+        acl_tag_t tag;
+        if (acl_get_tag_type(entry, &tag) == -1)
+            throw SysError("cannot get ACL entry tag type");
+
+        if (tag == ACL_USER && * (uid_t *) acl_get_qualifier(entry) == uid) {
+            if (acl_delete_entry(acl, entry) == -1)
+                throw SysError("cannot remove ACL entry");
+            break;
+        }
+    }
+
+    if (acl_calc_mask(&acl) == -1)
+        throw SysError("cannot calculate ACL mask");
+
+    if (acl_set_file(path.c_str(), ACL_TYPE_ACCESS, acl) == -1)
+        throw SysError("cannot set ACL on '%s'", path);
+}
+
+static void makePublic(const Path & path, bool executable)
+{
+    auto acl = acl_init(3);
+    if (!acl)
+        throw SysError("cannot initialise ACL", path);
+
+    Finally cleanup{[&]() { acl_free(acl); }};
+
+    for (auto & tag : {ACL_USER_OBJ, ACL_GROUP_OBJ, ACL_OTHER}) {
+        acl_entry_t entry;
+        if (acl_create_entry(&acl, &entry) == -1)
+            throw SysError("cannot create ACL entry");
+
+        if (acl_set_tag_type(entry, tag) == -1)
+            throw SysError("cannot set ACL entry tag type");
+
+        addPerm(entry, executable);
+    }
+
+    if (acl_set_file(path.c_str(), ACL_TYPE_ACCESS, acl) == -1)
+        throw SysError("cannot set ACL on '%s'", path);
+}
+
+static std::optional<std::set<StoreUser>> queryOwners(const Path & path)
+{
+    std::set<StoreUser> owners;
+
+    auto acl = acl_get_file(path.c_str(), ACL_TYPE_ACCESS);
+    if (!acl)
+        throw SysError("cannot get ACL on '%s'", path);
+
+    Finally cleanup{[&]() { acl_free(acl);}};
+
+    #if 0
+    auto s = acl_to_text(acl, nullptr);
+    if (!s)
+        throw SysError("FOO");
+    printError("ACL = %s", s);
+    #endif
+
+    acl_entry_t entry;
+    int entry_id = ACL_FIRST_ENTRY;
+
+    while (true) {
+        auto res = acl_get_entry(acl, entry_id, &entry);
+        entry_id = ACL_NEXT_ENTRY;
+        if (res == 0) break;
+        if (res != 1)
+            throw SysError("cannot get ACL entry");
+
+        acl_tag_t tag;
+        if (acl_get_tag_type(entry, &tag) == -1)
+            throw SysError("cannot get ACL entry tag type");
+        if (tag == ACL_OTHER) {
+            /* Check whether the path is public. */
+            acl_permset_t permset;
+            if (acl_get_permset(entry, &permset) == -1)
+                throw SysError("cannot get ACL permission set");
+            if (acl_get_perm(permset, ACL_READ) == 1)
+                return {};
+            continue;
+        }
+        if (tag != ACL_USER) continue;
+
+        auto uid = (uid_t *) acl_get_qualifier(entry);
+        if (!uid)
+            throw SysError("cannot get ACL entry qualifier");
+
+        // FIXME: cache
+        std::vector<char> buf(16384);
+        struct passwd pwbuf;
+        struct passwd * pw;
+        if (getpwuid_r(*uid, &pwbuf, buf.data(), buf.size(), &pw))
+            throw Error("cannot lookup uid %d", *uid);
+
+        owners.insert(StoreUser { .userName = pw->pw_name });
+    }
+
+    return {owners};
+}
+
+
 const time_t mtimeStore = 1; /* 1 second into the epoch */
 
 
-static void canonicaliseTimestampAndPermissions(const Path & path, const struct stat & st)
+static void canonicaliseTimestampAndPermissions(
+    const Path & path,
+    const struct stat & st,
+    bool isPrivate)
 {
     if (!S_ISLNK(st.st_mode)) {
 
         /* Mask out all type related bits. */
         mode_t mode = st.st_mode & ~S_IFMT;
 
-        if (mode != 0444 && mode != 0555) {
+        auto mask = isPrivate ? 0700 : 0777;
+
+        if (mode != (0444 & mask) && mode != (0555 & mask)) {
             mode = (st.st_mode & S_IFMT)
-                 | 0444
-                 | (st.st_mode & S_IXUSR ? 0111 : 0);
+                 | (0444 & mask)
+                 | (st.st_mode & S_IXUSR ? (0111 & mask) : 0);
             if (chmod(path.c_str(), mode) == -1)
                 throw SysError("changing mode of '%1%' to %2$o", path, mode);
         }
@@ -564,11 +745,15 @@ static void canonicaliseTimestampAndPermissions(const Path & path, const struct 
 
 void canonicaliseTimestampAndPermissions(const Path & path)
 {
-    canonicaliseTimestampAndPermissions(path, lstat(path));
+    canonicaliseTimestampAndPermissions(path, lstat(path), false); // FIXME
 }
 
 
-static void canonicalisePathMetaData_(const Path & path, uid_t fromUid, InodesSeen & inodesSeen)
+static void canonicalisePathMetaData_(
+    const Path & path,
+    uid_t fromUid,
+    bool isPrivate,
+    InodesSeen & inodesSeen)
 {
     checkInterrupt();
 
@@ -625,7 +810,7 @@ static void canonicalisePathMetaData_(const Path & path, uid_t fromUid, InodesSe
 
     inodesSeen.insert(Inode(st.st_dev, st.st_ino));
 
-    canonicaliseTimestampAndPermissions(path, st);
+    canonicaliseTimestampAndPermissions(path, st, isPrivate);
 
     /* Change ownership to the current uid.  If it's a symlink, use
        lchown if available, otherwise don't bother.  Wrong ownership
@@ -648,14 +833,19 @@ static void canonicalisePathMetaData_(const Path & path, uid_t fromUid, InodesSe
     if (S_ISDIR(st.st_mode)) {
         DirEntries entries = readDirectory(path);
         for (auto & i : entries)
-            canonicalisePathMetaData_(path + "/" + i.name, fromUid, inodesSeen);
+            // Note: only top-level paths are private.
+            canonicalisePathMetaData_(path + "/" + i.name, fromUid, false, inodesSeen);
     }
 }
 
 
-void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & inodesSeen)
+void canonicalisePathMetaData(
+    const Path & path,
+    uid_t fromUid,
+    const Owner & owner,
+    InodesSeen & inodesSeen)
 {
-    canonicalisePathMetaData_(path, fromUid, inodesSeen);
+    canonicalisePathMetaData_(path, fromUid, (bool) owner, inodesSeen);
 
     /* On platforms that don't have lchown(), the top-level path can't
        be a symlink, since we can't change its ownership. */
@@ -665,13 +855,22 @@ void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & ino
         assert(S_ISLNK(st.st_mode));
         throw Error("wrong ownership of top-level store path '%1%'", path);
     }
+
+    /* Set the initial owner, if it's not a public path. */
+    if (owner) {
+        addOwner(path, *owner, st.st_mode & S_IXUSR);
+        printError("ADD %s %s", owner->userName, path);
+    }
 }
 
 
-void canonicalisePathMetaData(const Path & path, uid_t fromUid)
+void canonicalisePathMetaData(
+    const Path & path,
+    uid_t fromUid,
+    const Owner & owner)
 {
     InodesSeen inodesSeen;
-    canonicalisePathMetaData(path, fromUid, inodesSeen);
+    canonicalisePathMetaData(path, fromUid, owner, inodesSeen);
 }
 
 
@@ -905,6 +1104,9 @@ std::shared_ptr<const ValidPathInfo> LocalStore::queryPathInfoInternal(State & s
 
     while (useQueryReferences.next())
         info->references.insert(parseStorePath(useQueryReferences.getStr(0)));
+
+    /* Get the owners. */
+    info->owners = queryOwners(Store::toRealPath(path));
 
     return info;
 }
@@ -1237,8 +1439,46 @@ bool LocalStore::realisationIsUntrusted(const Realisation & realisation)
     return requireSigs && !realisation.checkSignatures(getPublicKeys());
 }
 
-void LocalStore::addToStore(const ValidPathInfo & info, Source & source,
-    RepairFlag repair, CheckSigsFlag checkSigs)
+void LocalStore::grantAccess(const StorePath & path, const Owner & owner)
+{
+    queryPathInfo(path);
+
+    auto realPath = Store::toRealPath(path);
+
+    auto owners = queryOwners(realPath);
+
+    if (owners) {
+        if (owner) {
+            if (!owners->count(*owner)) {
+                printError("ADD OWNER %s", owner->userName);
+                // TODO: get rid of a redundant acl_get_file()
+                // call by merging queryOwners() and addOwner().
+                // TODO: get rid of lstat.
+                addOwner(realPath, *owner, lstat(realPath).st_mode & S_IXUSR);
+            }
+        } else {
+            printError("MAKE PUBLIC %s", realPath);
+            makePublic(realPath, lstat(realPath).st_mode & S_IXUSR);
+        }
+    }
+    else
+        // The path is already public, so there is nothing to do.
+        ;
+}
+
+void LocalStore::removeAccess(
+    const StorePath & path,
+    const StoreUser & owner)
+{
+    removeOwner(Store::toRealPath(path), owner);
+}
+
+void LocalStore::addToStore(
+    const ValidPathInfo & info,
+    Source & source,
+    RepairFlag repair,
+    CheckSigsFlag checkSigs,
+    const Owner & owner)
 {
     if (checkSigs && pathInfoIsUntrusted(info))
         throw Error("cannot add path '%s' because it lacks a valid signature", printStorePath(info.path));
@@ -1306,20 +1546,30 @@ void LocalStore::addToStore(const ValidPathInfo & info, Source & source,
 
             autoGC();
 
-            canonicalisePathMetaData(realPath, -1);
+            canonicalisePathMetaData(realPath, -1, owner); // FIXME
 
-            optimisePath(realPath, repair); // FIXME: combine with hashPath()
+            maybeOptimisePath(info.path, repair); // FIXME: combine with hashPath()
 
-            registerValidPath(info);
-        }
+            auto info2(info);
+            info2.owners = queryOwners(realPath); // FIXME: inefficient
+            registerValidPath(info2);
+        } else
+            grantAccess(info.path, owner);
 
         outputLock.setDeletion(true);
-    }
+    } else
+        grantAccess(info.path, owner);
 }
 
 
-StorePath LocalStore::addToStoreFromDump(Source & source0, const string & name,
-    FileIngestionMethod method, HashType hashAlgo, RepairFlag repair, const StorePathSet & references)
+StorePath LocalStore::addToStoreFromDump(
+    Source & source0,
+    const string & name,
+    FileIngestionMethod method,
+    HashType hashAlgo,
+    RepairFlag repair,
+    const StorePathSet & references,
+    const Owner & owner)
 {
     /* For computing the store path. */
     auto hashSink = std::make_unique<HashSink>(hashAlgo);
@@ -1396,6 +1646,8 @@ StorePath LocalStore::addToStoreFromDump(Source & source0, const string & name,
 
             autoGC();
 
+            // FIXME: create unreadable
+
             if (inMemory) {
                  StringSource dumpSource { dump };
                 /* Restore from the NAR in memory. */
@@ -1418,35 +1670,48 @@ StorePath LocalStore::addToStoreFromDump(Source & source0, const string & name,
                 narHash = narSink.finish();
             }
 
-            canonicalisePathMetaData(realPath, -1); // FIXME: merge into restorePath
+            canonicalisePathMetaData(realPath, -1, owner); // FIXME: merge into restorePath
 
-            optimisePath(realPath, repair);
+            maybeOptimisePath(dstPath, repair);
 
             ValidPathInfo info { dstPath, narHash.first };
             info.narSize = narHash.second;
             info.references = references;
             info.ca = FixedOutputHash { .method = method, .hash = hash };
+            info.owners = queryOwners(realPath); // FIXME: inefficient
             registerValidPath(info);
-        }
+        } else
+            grantAccess(dstPath, owner);
 
         outputLock.setDeletion(true);
-    }
+    } else
+        grantAccess(dstPath, owner);
 
     return dstPath;
 }
 
 
-StorePath LocalStore::addTextToStore(const string & name, const string & s,
-    const StorePathSet & references, RepairFlag repair)
+StorePath LocalStore::addTextToStore(
+    const string & name,
+    const string & s,
+    const StorePathSet & references,
+    RepairFlag repair,
+    const Owner & owner)
 {
     auto hash = hashString(htSHA256, s);
     auto dstPath = makeTextPath(name, hash, references);
 
     addTempRoot(dstPath);
 
-    if (repair || !isValidPath(dstPath)) {
+    auto realPath = Store::toRealPath(dstPath);
 
-        auto realPath = Store::toRealPath(dstPath);
+    // TODO: if 'owner' is set, check that all the references are
+    // accessible to 'owner'. If 'owner' is not set, check that all
+    // the references are public.
+
+    // TODO: repair should preserve the ACL.
+
+    if (repair || !isValidPath(dstPath)) {
 
         PathLocks outputLock({realPath});
 
@@ -1456,25 +1721,28 @@ StorePath LocalStore::addTextToStore(const string & name, const string & s,
 
             autoGC();
 
-            writeFile(realPath, s);
+            writeFile(realPath, s, 0600);
 
-            canonicalisePathMetaData(realPath, -1);
+            canonicalisePathMetaData(realPath, -1, owner);
 
             StringSink sink;
             dumpString(s, sink);
             auto narHash = hashString(htSHA256, sink.s);
 
-            optimisePath(realPath, repair);
+            maybeOptimisePath(dstPath, repair);
 
             ValidPathInfo info { dstPath, narHash };
             info.narSize = sink.s.size();
             info.references = references;
             info.ca = TextHash { .hash = hash };
+            info.owners = queryOwners(realPath); // FIXME: inefficient
             registerValidPath(info);
-        }
+        } else
+            grantAccess(dstPath, owner);
 
         outputLock.setDeletion(true);
-    }
+    } else
+        grantAccess(dstPath, owner);
 
     return dstPath;
 }
