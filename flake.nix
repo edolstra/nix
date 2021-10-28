@@ -202,7 +202,7 @@
           mkdir -p $out
         '';
 
-        installCheckPhase = "make installcheck -j$NIX_BUILD_CORES -l$NIX_BUILD_CORES";
+        installCheckPhase = "make installcheck";
       };
 
       binaryTarball = buildPackages: nix: pkgs: let
