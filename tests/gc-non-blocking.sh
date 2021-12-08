@@ -19,7 +19,7 @@ pid=$!
 
 sleep 2
 
-outPath=$(nix-build -o "$TEST_ROOT/result" -E "
+outPath=$(nix-build -vvvvv -o "$TEST_ROOT/result" -E "
   with import ./config.nix;
   mkDerivation {
     name = \"non-blocking\";
