@@ -573,7 +573,7 @@ void LocalStore::collectGarbage(const GCOptions & options, GCResults & results)
                             } else
                                 printError("received garbage instead of a root from client");
                             writeFull(fdClient.get(), "1", false);
-                        } catch (Error & e) { printError("UNEXPECTED GC WORKER EXIT (2): %s", e.msg()); break; }
+                        } catch (Error & e) { debug("reading GC root from client: %s", e.msg()); break; }
                     }
 
                     }
