@@ -331,6 +331,8 @@
           doInstallCheck = true;
           installCheckFlags = "sysconfdir=$(out)/etc";
 
+          installCheckPhase = "make installcheck";
+
           separateDebugInfo = true;
 
           strictDeps = true;
