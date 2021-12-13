@@ -503,6 +503,8 @@ void LocalStore::collectGarbage(const GCOptions & options, GCResults & results)
     shutdownPipe.create();
 
     std::thread serverThread([&]() {
+        try {
+            
         Sync<std::map<int, std::thread>> connections;
 
         Finally cleanup([&]() {
@@ -536,6 +538,8 @@ void LocalStore::collectGarbage(const GCOptions & options, GCResults & results)
                 /* Process the connection in a separate thread. */
                 auto fdClient_ = fdClient.get();
                 std::thread clientThread([&, fdClient = std::move(fdClient)]() {
+                    try {
+                        
                     Finally cleanup([&]() {
                         auto conn(connections.lock());
                         auto i = conn->find(fdClient.get());
@@ -569,13 +573,21 @@ void LocalStore::collectGarbage(const GCOptions & options, GCResults & results)
                             } else
                                 printError("received garbage instead of a root from client");
                             writeFull(fdClient.get(), "1", false);
-                        } catch (Error &) { break; }
+                        } catch (Error & e) { printError("UNEXPECTED GC WORKER EXIT (2): %s", e.msg()); break; }
                     }
+
+                    }
+                    catch (Error & e) { printError("UNEXPECTED GC WORKER EXIT: %s", e.msg()); throw; }
+                    catch (...) { printError("UNEXPECTED GC WORKER EXIT"); throw; }
                 });
 
                 connections.lock()->insert({fdClient_, std::move(clientThread)});
             }
         }
+
+        }
+        catch (Error & e) { printError("UNEXPECTED GC ROOTS EXIT: %s", e.msg()); throw; }
+        catch (...) { printError("UNEXPECTED GC ROOTS EXIT"); throw; }
     });
 
     Finally stopServer([&]() {
