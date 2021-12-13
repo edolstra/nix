@@ -140,12 +140,12 @@ void LocalStore::addTempRoot(const StorePath & path)
             /* The garbage collector may have exited, so we need to
                restart. */
             if (e.errNo == EPIPE) {
-                debug("GC socket disconnected");
+                debug("GC socket disconnected (1)");
                 state->fdRootsSocket.close();
                 goto restart;
             }
         } catch (EndOfFile & e) {
-            debug("GC socket disconnected");
+            debug("GC socket disconnected (2)");
             state->fdRootsSocket.close();
             goto restart;
         }
