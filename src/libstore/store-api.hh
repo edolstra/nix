@@ -705,9 +705,14 @@ public:
     /* Given a set of paths that are to be built, return the set of
        derivations that will be built, and the set of output paths
        that will be substituted. */
-    virtual void queryMissing(const std::vector<DerivedPath> & targets,
-        StorePathSet & willBuild, StorePathSet & willSubstitute, StorePathSet & unknown,
-        uint64_t & downloadSize, uint64_t & narSize);
+    virtual void queryMissing(
+        const std::vector<DerivedPath> & targets,
+        StorePathSet & willBuild,
+        StorePathSet & willSubstitute,
+        StorePathSet & unknown,
+        uint64_t & downloadSize,
+        uint64_t & narSize,
+        const Owner & owner);
 
     /* Sort a set of paths topologically under the references
        relation.  If p refers to q, then p precedes q in this list. */

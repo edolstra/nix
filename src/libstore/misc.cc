@@ -93,9 +93,14 @@ std::optional<ContentAddress> getDerivationCA(const BasicDerivation & drv)
     return std::nullopt;
 }
 
-void Store::queryMissing(const std::vector<DerivedPath> & targets,
-    StorePathSet & willBuild_, StorePathSet & willSubstitute_, StorePathSet & unknown_,
-    uint64_t & downloadSize_, uint64_t & narSize_)
+void Store::queryMissing(
+    const std::vector<DerivedPath> & targets,
+    StorePathSet & willBuild_,
+    StorePathSet & willSubstitute_,
+    StorePathSet & unknown_,
+    uint64_t & downloadSize_,
+    uint64_t & narSize_,
+    const Owner & owner)
 {
     Activity act(*logger, lvlDebug, actUnknown, "querying info about missing paths");
 
@@ -190,7 +195,7 @@ void Store::queryMissing(const std::vector<DerivedPath> & targets,
             }
             if (knownOutputPaths && invalid.empty()) return;
 
-            auto drv = make_ref<Derivation>(derivationFromPath(bfd.drvPath));
+            auto drv = make_ref<Derivation>(derivationFromPath(bfd.drvPath, owner));
             ParsedDerivation parsedDrv(StorePath(bfd.drvPath), *drv);
 
             if (knownOutputPaths && settings.useSubstitutes && parsedDrv.substitutesAllowed()) {

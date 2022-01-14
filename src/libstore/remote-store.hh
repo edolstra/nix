@@ -133,9 +133,14 @@ public:
 
     void addSignatures(const StorePath & storePath, const StringSet & sigs) override;
 
-    void queryMissing(const std::vector<DerivedPath> & targets,
-        StorePathSet & willBuild, StorePathSet & willSubstitute, StorePathSet & unknown,
-        uint64_t & downloadSize, uint64_t & narSize) override;
+    void queryMissing(
+        const std::vector<DerivedPath> & targets,
+        StorePathSet & willBuild,
+        StorePathSet & willSubstitute,
+        StorePathSet & unknown,
+        uint64_t & downloadSize,
+        uint64_t & narSize,
+        const Owner & owner) override;
 
     void addBuildLog(const StorePath & drvPath, std::string_view log) override;
 

@@ -973,9 +973,14 @@ void RemoteStore::addSignatures(const StorePath & storePath, const StringSet & s
 }
 
 
-void RemoteStore::queryMissing(const std::vector<DerivedPath> & targets,
-    StorePathSet & willBuild, StorePathSet & willSubstitute, StorePathSet & unknown,
-    uint64_t & downloadSize, uint64_t & narSize)
+void RemoteStore::queryMissing(
+    const std::vector<DerivedPath> & targets,
+    StorePathSet & willBuild,
+    StorePathSet & willSubstitute,
+    StorePathSet & unknown,
+    uint64_t & downloadSize,
+    uint64_t & narSize,
+    const Owner & owner)
 {
     {
         auto conn(getConnection());
@@ -985,6 +990,8 @@ void RemoteStore::queryMissing(const std::vector<DerivedPath> & targets,
             goto fallback;
         conn->to << wopQueryMissing;
         writeDerivedPaths(*this, conn, targets);
+        if (GET_PROTOCOL_MINOR(conn->daemonVersion) >= 33)
+            worker_proto::write(*this, conn->to, owner);
         conn.processStderr();
         willBuild = worker_proto::read(*this, conn->from, Phantom<StorePathSet> {});
         willSubstitute = worker_proto::read(*this, conn->from, Phantom<StorePathSet> {});
@@ -995,7 +1002,7 @@ void RemoteStore::queryMissing(const std::vector<DerivedPath> & targets,
 
  fallback:
     return Store::queryMissing(targets, willBuild, willSubstitute,
-        unknown, downloadSize, narSize);
+        unknown, downloadSize, narSize, owner);
 }
 
 

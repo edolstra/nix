@@ -5,6 +5,7 @@
 #include "common-args.hh"
 #include "path.hh"
 #include "derived-path.hh"
+#include "store-types.hh"
 
 #include <signal.h>
 
@@ -44,6 +45,7 @@ struct StorePathWithOutputs;
 void printMissing(
     ref<Store> store,
     const std::vector<DerivedPath> & paths,
+    const Owner & owner,
     Verbosity lvl = lvlInfo);
 
 void printMissing(ref<Store> store, const StorePathSet & willBuild,

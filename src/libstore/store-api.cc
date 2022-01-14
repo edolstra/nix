@@ -632,7 +632,7 @@ void Store::substitutePaths(const StorePathSet & paths)
     uint64_t downloadSize, narSize;
     StorePathSet willBuild, willSubstitute, unknown;
     queryMissing(paths2,
-        willBuild, willSubstitute, unknown, downloadSize, narSize);
+        willBuild, willSubstitute, unknown, downloadSize, narSize, {});
 
     if (!willSubstitute.empty())
         try {

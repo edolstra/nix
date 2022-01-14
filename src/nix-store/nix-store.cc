@@ -132,12 +132,12 @@ static void opRealise(Strings opFlags, Strings opArgs)
         paths.push_back(followLinksToStorePathWithOutputs(*store, i));
 
     // FIXME: pass owner
-    #if 0
     uint64_t downloadSize, narSize;
     StorePathSet willBuild, willSubstitute, unknown;
     store->queryMissing(
         toDerivedPaths(paths),
-        willBuild, willSubstitute, unknown, downloadSize, narSize);
+        willBuild, willSubstitute, unknown, downloadSize, narSize,
+        settings.getOwner());
 
     if (ignoreUnknown) {
         std::vector<StorePathWithOutputs> paths2;
@@ -149,7 +149,6 @@ static void opRealise(Strings opFlags, Strings opArgs)
 
     if (settings.printMissing)
         printMissing(ref<Store>(store), willBuild, willSubstitute, unknown, downloadSize, narSize);
-    #endif
 
     if (dryRun) return;
 

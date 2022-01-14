@@ -905,10 +905,15 @@ static void performOp(
 
     case wopQueryMissing: {
         auto targets = readDerivedPaths(*store, clientVersion, from);
+        auto owner =
+            GET_PROTOCOL_MINOR(clientVersion) >= 33
+            ? worker_proto::read(*store, from, Phantom<Owner> {})
+            : std::nullopt;
         logger->startWork();
+        checkOwner(owner);
         StorePathSet willBuild, willSubstitute, unknown;
         uint64_t downloadSize, narSize;
-        store->queryMissing(targets, willBuild, willSubstitute, unknown, downloadSize, narSize);
+        store->queryMissing(targets, willBuild, willSubstitute, unknown, downloadSize, narSize, owner);
         logger->stopWork();
         worker_proto::write(*store, to, willBuild);
         worker_proto::write(*store, to, willSubstitute);

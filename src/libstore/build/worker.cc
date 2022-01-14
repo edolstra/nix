@@ -243,13 +243,10 @@ void Worker::run(const Goals & _topGoals)
         }
     }
 
-    // FIXME: pass owner
-    #if 0
     /* Call queryMissing() to efficiently query substitutes. */
     StorePathSet willBuild, willSubstitute, unknown;
     uint64_t downloadSize, narSize;
-    store.queryMissing(topPaths, willBuild, willSubstitute, unknown, downloadSize, narSize);
-    #endif
+    store.queryMissing(topPaths, willBuild, willSubstitute, unknown, downloadSize, narSize, owner);
 
     debug("entered goal loop");
 

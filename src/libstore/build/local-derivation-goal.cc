@@ -1282,12 +1282,17 @@ struct RestrictedStore : public virtual RestrictedStoreConfig, public virtual Lo
         LocalFSStore::narFromPath(path, sink);
     }
 
+    void assertNoOwner(const Owner & owner)
+    {
+        if (owner)
+            throw Error("recursive Nix does not support specifying an owner");
+    }
+
     void ensurePath(
         const StorePath & path,
         const Owner & owner) override
     {
-        if (owner)
-            throw Error("recursive Nix does not support specifying an owner");
+        assertNoOwner(owner);
 
         if (!goal.isAllowed(path))
             throw InvalidPath("cannot substitute unknown path '%s' in recursive Nix", printStorePath(path));
@@ -1319,8 +1324,7 @@ struct RestrictedStore : public virtual RestrictedStoreConfig, public virtual Lo
 
         if (buildMode != bmNormal) throw Error("unsupported build mode");
 
-        if (owner)
-            throw Error("recursive Nix does not support specifying an owner");
+        assertNoOwner(owner);
 
         StorePathSet newPaths;
         std::set<Realisation> newRealisations;
@@ -1379,10 +1383,17 @@ struct RestrictedStore : public virtual RestrictedStoreConfig, public virtual Lo
     void addSignatures(const StorePath & storePath, const StringSet & sigs) override
     { unsupported("addSignatures"); }
 
-    void queryMissing(const std::vector<DerivedPath> & targets,
-        StorePathSet & willBuild, StorePathSet & willSubstitute, StorePathSet & unknown,
-        uint64_t & downloadSize, uint64_t & narSize) override
+    void queryMissing(
+        const std::vector<DerivedPath> & targets,
+        StorePathSet & willBuild,
+        StorePathSet & willSubstitute,
+        StorePathSet & unknown,
+        uint64_t & downloadSize,
+        uint64_t & narSize,
+        const Owner & owner) override
     {
+        assertNoOwner(owner);
+
         /* This is slightly impure since it leaks information to the
            client about what paths will be built/substituted or are
            already present. Probably not a big deal. */
@@ -1396,7 +1407,7 @@ struct RestrictedStore : public virtual RestrictedStoreConfig, public virtual Lo
         }
 
         next->queryMissing(allowed, willBuild, willSubstitute,
-            unknown, downloadSize, narSize);
+            unknown, downloadSize, narSize, owner);
     }
 };
 

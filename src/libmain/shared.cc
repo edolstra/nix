@@ -44,11 +44,15 @@ void printGCWarning()
 }
 
 
-void printMissing(ref<Store> store, const std::vector<DerivedPath> & paths, Verbosity lvl)
+void printMissing(
+    ref<Store> store,
+    const std::vector<DerivedPath> & paths,
+    const Owner & owner,
+    Verbosity lvl)
 {
     uint64_t downloadSize, narSize;
     StorePathSet willBuild, willSubstitute, unknown;
-    store->queryMissing(paths, willBuild, willSubstitute, unknown, downloadSize, narSize);
+    store->queryMissing(paths, willBuild, willSubstitute, unknown, downloadSize, narSize, owner);
     printMissing(store, willBuild, willSubstitute, unknown, downloadSize, narSize, lvl);
 }
 

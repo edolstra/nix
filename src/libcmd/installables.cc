@@ -374,7 +374,7 @@ struct InstallableStorePath : Installable
             // FIXME: this makes 'nix path-info --derivation' fail if
             // we don't have access, even though we don't need the
             // output names.
-            auto drv = store->readDerivation(storePath);
+            auto drv = store->readDerivation(storePath, settings.getOwner());
             return {
                 DerivedPath::Built {
                     .drvPath = storePath,
@@ -745,7 +745,7 @@ BuiltPaths getBuiltPaths(ref<Store> evalStore, ref<Store> store, const DerivedPa
                 },
                 [&](const DerivedPath::Built & bfd) {
                     OutputPathMap outputs;
-                    auto drv = evalStore->readDerivation(bfd.drvPath);
+                    auto drv = evalStore->readDerivation(bfd.drvPath, settings.getOwner());
                     auto outputHashes = staticOutputHashes(*evalStore, drv); // FIXME: expensive
                     auto drvOutputs = drv.outputsAndOptPaths(*store);
                     for (auto & output : bfd.outputs) {
@@ -801,7 +801,7 @@ BuiltPaths build(
     }
 
     if (mode == Realise::Nothing || mode == Realise::Derivation)
-        printMissing(store, pathsToBuild, lvlError);
+        printMissing(store, pathsToBuild, settings.getOwner(), lvlError);
     else if (mode == Realise::Outputs)
         store->buildPaths(pathsToBuild, bMode, evalStore, settings.getOwner());
 

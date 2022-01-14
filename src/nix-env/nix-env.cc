@@ -478,7 +478,7 @@ static void printMissing(EvalState & state, DrvInfos & elems)
             targets.push_back(DerivedPath::Opaque{state.store->parseStorePath(i.queryOutPath())});
     }
 
-    printMissing(state.store, targets);
+    printMissing(state.store, targets, {});
 }
 
 
@@ -753,7 +753,7 @@ static void opSet(Globals & globals, Strings opFlags, Strings opArgs)
                 globals.state->store->parseStorePath(drv.queryOutPath())
             }),
     };
-    printMissing(globals.state->store, paths);
+    printMissing(globals.state->store, paths, {});
     if (globals.dryRun) return;
     globals.state->store->buildPaths(paths, globals.state->repair ? bmRepair : bmNormal);
 
