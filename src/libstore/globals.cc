@@ -183,8 +183,8 @@ bool Settings::isWSL1()
 
 Owner Settings::getOwner()
 {
-    if (owner == "") return {};
-    return StoreUser { .userName = owner };
+    if (!privatePaths) return {};
+    return StoreUser { .userName = owner != "" ? owner.get() : getUserName() };
 }
 
 const string nixVersion = PACKAGE_VERSION;

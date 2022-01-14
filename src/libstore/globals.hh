@@ -975,6 +975,14 @@ public:
           empty, the summary is generated based on the action performed.
         )"};
 
+    Setting<bool> privatePaths{this, false, "private",
+        R"(
+          If set to `false`, newly added or built store paths will be public (world-readable).
+          Otherwise, they will be readable only by the user specified by the `owner` setting
+          and any other users that have added or built the same paths.
+        )"};
+
+    // FIXME: rename, "owner" is not correct.
     Setting<std::string> owner{this, "", "owner", "TODO"};
 
     Owner getOwner();
