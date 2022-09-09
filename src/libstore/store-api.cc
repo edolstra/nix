@@ -305,9 +305,7 @@ void Store::addMultipleToStore(
         [&](const StorePath & path) {
             checkInterrupt();
 
-            auto & [info_, source] = *infosMap.at(path);
-            auto info = info_;
-            info.ultimate = false;
+            auto & [info, source] = *infosMap.at(path);
 
             if (!isValidPath(info.path)) {
                 MaintainCount<decltype(nrRunning)> mc(nrRunning);
