@@ -26,14 +26,14 @@ std::string EvalState::encodePath(const SourcePath & path)
         : fmt("%s%08x-source%s", virtualPathMarker, path.accessor->number, path.path.absOrEmpty());
 }
 
-SourcePath EvalState::decodePath(std::string_view s, PosIdx pos)
+SourcePath EvalState::decodePath(std::string_view s, PosIdx pos, std::string_view errorCtx)
 {
     if (!hasPrefix(s, "/"))
-        throwEvalError(pos, "string '%1%' doesn't represent an absolute path", s);
+        error("string '%1%' doesn't represent an absolute path", s).withTrace(pos, errorCtx).debugThrow<EvalError>();
 
     if (hasPrefix(s, virtualPathMarker)) {
-        auto fail = [s]() {
-            throw Error("cannot decode virtual path '%s'", s);
+        auto fail = [this, s, pos, errorCtx]() {
+            error("cannot decode virtual path '%1'", s).withTrace(pos, errorCtx).debugThrow<Error>();
         };
 
         s = s.substr(virtualPathMarker.size());
@@ -59,33 +59,33 @@ SourcePath EvalState::decodePath(std::string_view s, PosIdx pos)
         return {rootFS, CanonPath(s)};
 }
 
-std::string EvalState::decodePaths(std::string_view s)
+std::string EvalState::decodePaths(std::string_view s, PosIdx pos, std::string_view errorCtx)
 {
     std::string res;
 
-    size_t pos = 0;
+    size_t sPos = 0;
 
     while (true) {
-        auto m = s.find(virtualPathMarker, pos);
+        auto m = s.find(virtualPathMarker, sPos);
         if (m == s.npos) {
-            res.append(s.substr(pos));
+            res.append(s.substr(sPos));
             return res;
         }
 
-        res.append(s.substr(pos, m - pos));
+        res.append(s.substr(sPos, m - sPos));
 
         auto end = s.find_first_of(" \n\r\t'\"’:", m);
         if (end == s.npos) end = s.size();
 
         try {
-            auto path = decodePath(s.substr(m, end - m), noPos);
+            auto path = decodePath(s.substr(m, end - m), pos, errorCtx);
             res.append(path.to_string());
         } catch (...) {
             throw;
-            res.append(s.substr(pos, end - m));
+            res.append(s.substr(sPos, end - m));
         }
 
-        pos = end;
+        sPos = end;
     }
 }
 

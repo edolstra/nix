@@ -7,7 +7,7 @@ static void prim_patch(EvalState & state, const PosIdx pos, Value * * args, Valu
     std::vector<std::string> patches;
     std::optional<SourcePath> src;
 
-    state.forceAttrs(*args[0], pos);
+    state.forceAttrs(*args[0], pos, "while evaluating the first argument passed to builtins.patch");
 
     for (auto & attr : *args[0]->attrs) {
         std::string_view n(state.symbols[attr.name]);
@@ -15,50 +15,51 @@ static void prim_patch(EvalState & state, const PosIdx pos, Value * * args, Valu
         auto check = [&]()
         {
             if (!patches.empty())
-                state.debugThrowLastTrace(EvalError({
-                    .msg = hintfmt("'builtins.patch' does not support both 'patches' and 'patchFiles'"),
-                    .errPos = state.positions[attr.pos]
-                }));
+                state.error("'builtins.patch' does not support both 'patches' and 'patchFiles'").atPos(attr.pos)
+                    .withTrace(args[0]->attrs->pos, "from the first argument passed to builtins.patch")
+                    .debugThrow<EvalError>();
         };
 
         if (n == "src") {
             PathSet context;
-            src.emplace(state.coerceToPath(pos, *attr.value, context));
+            src.emplace(state.coerceToPath(pos, *attr.value, context,
+                        "while evaluating the `src` attribute of the first argument passed to builtins.patch"));
         }
 
         else if (n == "patchFiles") {
             check();
-            state.forceList(*attr.value, attr.pos);
+            state.forceList(*attr.value, attr.pos,
+                    "while evaluating the `patchFiles` attribute of the first argument passed to builtins.patch");
             for (auto elem : attr.value->listItems()) {
                 // FIXME: use realisePath
                 PathSet context;
-                auto patchFile = state.coerceToPath(attr.pos, *elem, context);
+                auto patchFile = state.coerceToPath(attr.pos, *elem, context,
+                        "while evaluating the `patchFiles` attribute of the first argument passed to builtins.patch");
                 patches.push_back(patchFile.readFile());
             }
         }
 
         else if (n == "patches") {
             check();
-            state.forceList(*attr.value, attr.pos);
+            state.forceList(*attr.value, attr.pos,
+                    "while evaluating the `patches` attribute of the first argument passed to builtins.patch");
             for (auto elem : attr.value->listItems())
-                patches.push_back(std::string(state.forceStringNoCtx(*elem, attr.pos)));
+                patches.push_back(std::string(state.forceStringNoCtx(*elem, attr.pos,
+                                "while evaluating an element of the `patches` attribute of the first argument passed to builtins.patch")));
         }
 
         else
-            throw Error({
-                .msg = hintfmt("attribute '%s' isn't supported in call to 'builtins.patch'", n),
-                .errPos = state.positions[pos]
-            });
+            state.error("`%s` attribute unsupported in the first argument passed to builtins.patch", n).atPos(args[0]->attrs->pos)
+                .debugThrow<Error>();
     }
 
     if (!src)
-        state.debugThrowLastTrace(EvalError({
-            .msg = hintfmt("attribute 'src' is missing in call to 'builtins.patch'"),
-            .errPos = state.positions[pos]
-        }));
+        state.error("`src` attribute required in the first argument passed to builtins.patch").atPos(args[0]->attrs->pos)
+            .debugThrow<EvalError>();
 
     if (!src->path.isRoot())
-        throw UnimplementedError("applying patches to a non-root path ('%s') is not yet supported", src->path);
+        state.error("applying patches to a non-root path ('%s') is not yet supported", src->path)
+            .withTrace(pos, "while evaluating a call to builtins.patch").debugThrow<UnimplementedError>();
 
     auto accessor = makePatchingInputAccessor(src->accessor, patches);
 

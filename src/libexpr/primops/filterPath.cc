@@ -90,40 +90,34 @@ static void prim_filterPath(EvalState & state, PosIdx pos, Value * * args, Value
     Value * filterFun = nullptr;
     PathSet context;
 
-    state.forceAttrs(*args[0], pos);
+    state.forceAttrs(*args[0], pos, "while evaluating the first argument passed to builtins.filterPath");
 
     for (auto & attr : *args[0]->attrs) {
         auto n = state.symbols[attr.name];
         if (n == "path")
-            path.emplace(state.coerceToPath(attr.pos, *attr.value, context));
+            path.emplace(state.coerceToPath(attr.pos, *attr.value, context,
+                        "while evaluating the `path` attribute of the first argument passed to builtins.filterPath"));
         else if (n == "filter") {
             state.forceValue(*attr.value, pos);
             filterFun = attr.value;
         }
         else
-            state.debugThrowLastTrace(EvalError({
-                .msg = hintfmt("unsupported argument '%1%' to 'filterPath'", state.symbols[attr.name]),
-                .errPos = state.positions[attr.pos]
-            }));
+            state.error("unsupported argument '%1%' to builtins.filterPath", state.symbols[attr.name]).atPos(attr.pos)
+                .withTrace(args[0]->attrs->pos, "while evaluating the first argument passed to builtins.filterPath")
+                .debugThrow<EvalError>();
     }
 
     if (!path)
-        state.debugThrowLastTrace(EvalError({
-            .msg = hintfmt("'path' required"),
-            .errPos = state.positions[pos]
-        }));
+        state.error("`path` attribute required in the first argument passed to builtins.filterPath")
+            .atPos(args[0]->attrs->pos).debugThrow<EvalError>();
 
     if (!filterFun)
-        state.debugThrowLastTrace(EvalError({
-            .msg = hintfmt("'filter' required"),
-            .errPos = state.positions[pos]
-        }));
+        state.error("`filter` attribute required in the first argument passed to builtins.filterPath")
+            .atPos(args[0]->attrs->pos).debugThrow<EvalError>();
 
     if (!context.empty())
-        state.debugThrowLastTrace(EvalError({
-            .msg = hintfmt("'path' argument to 'filterPath' cannot have a context"),
-            .errPos = state.positions[pos]
-        }));
+        state.error("`path` attribute cannot have a context in the first argument passed to builtins.filterPath")
+            .atPos(args[0]->attrs->pos).debugThrow<EvalError>();
 
     auto accessor = make_ref<FilteringInputAccessor>(state, pos, *path, filterFun);
 

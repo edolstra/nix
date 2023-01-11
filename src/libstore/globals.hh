@@ -329,7 +329,7 @@ public:
           Whether to execute builds inside cgroups.
           This is only supported on Linux.
 
-          Cgroups are required and enabled automatically for derivations 
+          Cgroups are required and enabled automatically for derivations
           that require the `uid-range` system feature.
 
           > **Warning**
@@ -490,6 +490,9 @@ public:
           followed by `?`, then it is not an error if *source* does not exist;
           for example, `/dev/nvidiactl?` specifies that `/dev/nvidiactl` will
           only be mounted in the sandbox if it exists in the host filesystem.
+
+          If the source is in the Nix store, then its closure will be added to
+          the sandbox as well.
 
           Depending on how Nix was built, the default value for this option
           may be empty or provide `/bin/sh` as a bind-mount of `bash`.
@@ -673,7 +676,7 @@ public:
           - the store object is signed by one of the [`trusted-public-keys`](#conf-trusted-public-keys)
           - the substituter is in the [`trusted-substituters`](#conf-trusted-substituters) list
           - the [`require-sigs`](#conf-require-sigs) option has been set to `false`
-          - the store object is [output-addressed](glossary.md#gloss-output-addressed-store-object)
+          - the store object is [output-addressed](@docroot@/glossary.md#gloss-output-addressed-store-object)
         )",
         {"binary-caches"}};
 
@@ -983,5 +986,13 @@ void loadConfFile();
 std::vector<Path> getUserConfigFiles();
 
 extern const std::string nixVersion;
+
+/* NB: This is not sufficient. You need to call initNix() */
+void initLibStore();
+
+/* It's important to initialize before doing _anything_, which is why we
+   call upon the programmer to handle this correctly. However, we only add
+   this in a key locations, so as not to litter the code. */
+void assertLibStoreInitialized();
 
 }

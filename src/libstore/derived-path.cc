@@ -88,7 +88,7 @@ DerivedPath::Built DerivedPath::Built::parse(const Store & store, std::string_vi
         if (outputs.empty())
             throw Error(
                  "Explicit list of wanted outputs '%s' must not be empty. Consider using '*' as a wildcard meaning all outputs if no output in particular is wanted.", outputsS);
-	}
+    }
     return {drvPath, outputs};
 }
 
