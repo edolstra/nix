@@ -11,7 +11,7 @@ them to be rolled back easily.
 
 The default profile used by `nix profile` is `$HOME/.nix-profile`,
 which, if it does not exist, is created as a symlink to
-`/nix/var/nix/profiles/per-user/default` if Nix is invoked by the
+`/nix/var/nix/profiles/default` if Nix is invoked by the
 `root` user, or `/nix/var/nix/profiles/per-user/`*username* otherwise.
 
 You can specify another profile location using `--profile` *path*.
@@ -70,7 +70,7 @@ are installed in this version of the profile. It looks like this:
     {
       "active": true,
       "attrPath": "legacyPackages.x86_64-linux.zoom-us",
-      "originalUri": "flake:nixpkgs",
+      "originalUrl": "flake:nixpkgs",
       "storePaths": [
         "/nix/store/wbhg2ga8f3h87s9h5k0slxk0m81m4cxl-zoom-us-5.3.469451.0927"
       ],
@@ -84,19 +84,18 @@ are installed in this version of the profile. It looks like this:
 Each object in the array `elements` denotes an installed package and
 has the following fields:
 
-* `originalUri`: The [flake reference](./nix3-flake.md) specified by
+* `originalUrl`: The [flake reference](./nix3-flake.md) specified by
   the user at the time of installation (e.g. `nixpkgs`). This is also
   the flake reference that will be used by `nix profile upgrade`.
 
-* `uri`: The immutable flake reference to which `originalUri`
-  resolved.
+* `uri`: The locked flake reference to which `originalUrl` resolved.
 
 * `attrPath`: The flake output attribute that provided this
   package. Note that this is not necessarily the attribute that the
   user specified, but the one resulting from applying the default
   attribute paths and prefixes; for instance, `hello` might resolve to
   `packages.x86_64-linux.hello` and the empty string to
-  `defaultPackage.x86_64-linux`.
+  `packages.x86_64-linux.default`.
 
 * `storePath`: The paths in the Nix store containing the package.
 

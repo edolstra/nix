@@ -29,7 +29,7 @@ void SSHMaster::addCommonSSHOpts(Strings & args)
     if (!sshPublicHostKey.empty()) {
         Path fileName = (Path) *state->tmpDir + "/host-key";
         auto p = host.rfind("@");
-        string thost = p != string::npos ? string(host, p + 1) : host;
+        std::string thost = p != std::string::npos ? std::string(host, p + 1) : host;
         writeFile(fileName, thost + " " + base64Decode(sshPublicHostKey) + "\n");
         args.insert(args.end(), {"-oUserKnownHostsFile=" + fileName});
     }
@@ -67,7 +67,7 @@ std::unique_ptr<SSHMaster::Connection> SSHMaster::startCommand(const std::string
         if (fakeSSH) {
             args = { "bash", "-c" };
         } else {
-            args = { "ssh", host.c_str(), "-x", "-a" };
+            args = { "ssh", host.c_str(), "-x" };
             addCommonSSHOpts(args);
             if (socketPath != "")
                 args.insert(args.end(), {"-S", socketPath});

@@ -31,7 +31,7 @@ subcommand to be performed. These are documented below.
 Several commands, such as `nix-env -q` and `nix-env -i`, take a list of
 arguments that specify the packages on which to operate. These are
 extended regular expressions that must match the entire name of the
-package. (For details on regular expressions, see regex7.) The match is
+package. (For details on regular expressions, see **regex**(7).) The match is
 case-sensitive. The regular expression can optionally be followed by a
 dash and a version number; if omitted, any version of the package will
 match. Here are some examples:
@@ -198,16 +198,18 @@ a number of possible ways:
     another.
 
   - If `--from-expression` is given, *args* are Nix
-    [functions](../expressions/language-constructs.md#functions)
+    [functions](../language/constructs.md#functions)
     that are called with the active Nix expression as their single
     argument. The derivations returned by those function calls are
     installed. This allows derivations to be specified in an
     unambiguous way, which is necessary if there are multiple
     derivations with the same name.
 
-  - If *args* are store derivations, then these are
+  - If *args* are [store derivation]s, then these are
     [realised](nix-store.md#operation---realise), and the resulting output paths
     are installed.
+
+    [store derivation]: ../glossary.md#gloss-store-derivation
 
   - If *args* are store paths that are not store derivations, then these
     are [realised](nix-store.md#operation---realise) and installed.
@@ -238,13 +240,25 @@ a number of possible ways:
 
 ## Examples
 
-To install a specific version of `gcc` from the active Nix expression:
+To install a package using a specific attribute path from the active Nix expression:
+
+```console
+$ nix-env -iA gcc40mips
+installing `gcc-4.0.2'
+$ nix-env -iA xorg.xorgserver
+installing `xorg-server-1.2.0'
+```
+
+To install a specific version of `gcc` using the derivation name:
 
 ```console
 $ nix-env --install gcc-3.3.2
 installing `gcc-3.3.2'
 uninstalling `gcc-3.1'
 ```
+
+Using attribute path for selecting a package is preferred,
+as it is much faster and there will not be multiple matches.
 
 Note the previously installed version is removed, since
 `--preserve-installed` was not specified.
@@ -254,13 +268,6 @@ To install an arbitrary version:
 ```console
 $ nix-env --install gcc
 installing `gcc-3.3.2'
-```
-
-To install using a specific attribute:
-
-```console
-$ nix-env -i -A gcc40mips
-$ nix-env -i -A xorg.xorgserver
 ```
 
 To install all derivations in the Nix expression `foo.nix`:
@@ -275,7 +282,7 @@ To copy the store path with symbolic name `gcc` from another profile:
 $ nix-env -i --from-profile /nix/var/nix/profiles/foo gcc
 ```
 
-To install a specific store derivation (typically created by
+To install a specific [store derivation] (typically created by
 `nix-instantiate`):
 
 ```console
@@ -374,22 +381,29 @@ For the other flags, see `--install`.
 ## Examples
 
 ```console
-$ nix-env --upgrade gcc
+$ nix-env --upgrade -A nixpkgs.gcc
 upgrading `gcc-3.3.1' to `gcc-3.4'
 ```
 
+When there are no updates available, nothing will happen:
+
 ```console
-$ nix-env -u gcc-3.3.2 --always (switch to a specific version)
+$ nix-env --upgrade -A nixpkgs.pan
+```
+
+Using `-A` is preferred when possible, as it is faster and unambiguous but
+it is also possible to upgrade to a specific version by matching the derivation name:
+
+```console
+$ nix-env -u gcc-3.3.2 --always
 upgrading `gcc-3.4' to `gcc-3.3.2'
 ```
 
-```console
-$ nix-env --upgrade pan
-(no upgrades available, so nothing happens)
-```
+To try to upgrade everything
+(matching packages based on the part of the derivation name without version):
 
 ```console
-$ nix-env -u (try to upgrade everything)
+$ nix-env -u
 upgrading `hello-2.1.2' to `hello-2.1.3'
 upgrading `mozilla-1.2' to `mozilla-1.4'
 ```
@@ -400,8 +414,8 @@ The upgrade operation determines whether a derivation `y` is an upgrade
 of a derivation `x` by looking at their respective `name` attributes.
 The names (e.g., `gcc-3.3.1` are split into two parts: the package name
 (`gcc`), and the version (`3.3.1`). The version part starts after the
-first dash not followed by a letter. `x` is considered an upgrade of `y`
-if their package names match, and the version of `y` is higher that that
+first dash not followed by a letter. `y` is considered an upgrade of `x`
+if their package names match, and the version of `y` is higher than that
 of `x`.
 
 The versions are compared by splitting them into contiguous components
@@ -653,7 +667,7 @@ derivation is shown unless `--no-name` is specified.
     Print the `system` attribute of the derivation.
 
   - `--drv-path`\
-    Print the path of the store derivation.
+    Print the path of the [store derivation].
 
   - `--out-path`\
     Print the output path of the derivation.

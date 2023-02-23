@@ -15,12 +15,12 @@ namespace nix {
 
 /* Parse a generation name of the format
    `<profilename>-<number>-link'. */
-static std::optional<GenerationNumber> parseName(const string & profileName, const string & name)
+static std::optional<GenerationNumber> parseName(const std::string & profileName, const std::string & name)
 {
-    if (string(name, 0, profileName.size() + 1) != profileName + "-") return {};
-    string s = string(name, profileName.size() + 1);
-    string::size_type p = s.find("-link");
-    if (p == string::npos) return {};
+    if (name.substr(0, profileName.size() + 1) != profileName + "-") return {};
+    auto s = name.substr(profileName.size() + 1);
+    auto p = s.find("-link");
+    if (p == std::string::npos) return {};
     if (auto n = string2Int<unsigned int>(s.substr(0, p)))
         return *n;
     else
@@ -209,13 +209,13 @@ void deleteGenerationsOlderThan(const Path & profile, time_t t, bool dryRun)
 }
 
 
-void deleteGenerationsOlderThan(const Path & profile, const string & timeSpec, bool dryRun)
+void deleteGenerationsOlderThan(const Path & profile, std::string_view timeSpec, bool dryRun)
 {
     if (timeSpec.empty() || timeSpec[timeSpec.size() - 1] != 'd')
         throw UsageError("invalid number of days specifier '%1%', expected something like '14d'", timeSpec);
 
     time_t curTime = time(0);
-    string strDays = string(timeSpec, 0, timeSpec.size() - 1);
+    auto strDays = timeSpec.substr(0, timeSpec.size() - 1);
     auto days = string2Int<int>(strDays);
 
     if (!days || *days < 1)
@@ -274,22 +274,30 @@ void lockProfile(PathLocks & lock, const Path & profile)
 }
 
 
-string optimisticLockProfile(const Path & profile)
+std::string optimisticLockProfile(const Path & profile)
 {
     return pathExists(profile) ? readLink(profile) : "";
 }
 
 
+Path profilesDir()
+{
+    auto profileRoot = createNixStateDir() + "/profiles";
+    createDirs(profileRoot);
+    return profileRoot;
+}
+
+
 Path getDefaultProfile()
 {
-    Path profileLink = getHome() + "/.nix-profile";
+    Path profileLink = settings.useXDGBaseDirectories ? createNixStateDir() + "/profile" : getHome() + "/.nix-profile";
     try {
+        auto profile =
+            getuid() == 0
+            ? settings.nixStateDir + "/profiles/default"
+            : profilesDir() + "/profile";
         if (!pathExists(profileLink)) {
-            replaceSymlink(
-                getuid() == 0
-                ? settings.nixStateDir + "/profiles/default"
-                : fmt("%s/profiles/per-user/%s/profile", settings.nixStateDir, getUserName()),
-                profileLink);
+            replaceSymlink(profile, profileLink);
         }
         return absPath(readLink(profileLink), dirOf(profileLink));
     } catch (Error &) {

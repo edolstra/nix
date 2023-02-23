@@ -1,10 +1,13 @@
 #include "daemon.hh"
 #include "monitor-fd.hh"
 #include "worker-protocol.hh"
+#include "build-result.hh"
 #include "store-api.hh"
+#include "store-cast.hh"
+#include "gc-store.hh"
+#include "log-store.hh"
 #include "path-with-outputs.hh"
 #include "finally.hh"
-#include "affinity.hh"
 #include "archive.hh"
 #include "derivations.hh"
 #include "args.hh"
@@ -70,7 +73,7 @@ struct TunnelLogger : public Logger
 
         StringSink buf;
         buf << STDERR_NEXT << (fs.s + "\n");
-        enqueueMsg(*buf.s);
+        enqueueMsg(buf.s);
     }
 
     void logEI(const ErrorInfo & ei) override
@@ -82,7 +85,7 @@ struct TunnelLogger : public Logger
 
         StringSink buf;
         buf << STDERR_NEXT << oss.str();
-        enqueueMsg(*buf.s);
+        enqueueMsg(buf.s);
     }
 
     /* startWork() means that we're starting an operation for which we
@@ -130,7 +133,7 @@ struct TunnelLogger : public Logger
 
         StringSink buf;
         buf << STDERR_START_ACTIVITY << act << lvl << type << s << fields << parent;
-        enqueueMsg(*buf.s);
+        enqueueMsg(buf.s);
     }
 
     void stopActivity(ActivityId act) override
@@ -138,7 +141,7 @@ struct TunnelLogger : public Logger
         if (GET_PROTOCOL_MINOR(clientVersion) < 20) return;
         StringSink buf;
         buf << STDERR_STOP_ACTIVITY << act;
-        enqueueMsg(*buf.s);
+        enqueueMsg(buf.s);
     }
 
     void result(ActivityId act, ResultType type, const Fields & fields) override
@@ -146,7 +149,7 @@ struct TunnelLogger : public Logger
         if (GET_PROTOCOL_MINOR(clientVersion) < 20) return;
         StringSink buf;
         buf << STDERR_RESULT << act << type << fields;
-        enqueueMsg(*buf.s);
+        enqueueMsg(buf.s);
     }
 };
 
@@ -219,7 +222,8 @@ struct ClientSettings
                     else if (!hasSuffix(s, "/") && trusted.count(s + "/"))
                         subs.push_back(s + "/");
                     else
-                        warn("ignoring untrusted substituter '%s'", s);
+                        warn("ignoring untrusted substituter '%s', you are not a trusted user.\n"
+                             "Run `man nix.conf` for more information on the `substituters` configuration option.", s);
                 res = subs;
                 return true;
             };
@@ -230,11 +234,17 @@ struct ClientSettings
                 else if (name == settings.experimentalFeatures.name) {
                     // We don’t want to forward the experimental features to
                     // the daemon, as that could cause some pretty weird stuff
-                    if (tokenizeString<Strings>(value) != settings.experimentalFeatures.get())
+                    if (parseFeatures(tokenizeString<StringSet>(value)) != settings.experimentalFeatures.get())
                         debug("Ignoring the client-specified experimental features");
+                } else if (name == settings.pluginFiles.name) {
+                    if (tokenizeString<Paths>(value) != settings.pluginFiles.get())
+                        warn("Ignoring the client-specified plugin-files.\n"
+                             "The client specifying plugins to the daemon never made sense, and was removed in Nix >=2.14.");
                 }
                 else if (trusted
                     || name == settings.buildTimeout.name
+                    || name == settings.maxSilentTime.name
+                    || name == settings.pollInterval.name
                     || name == "connect-timeout"
                     || (name == "builders" && value == ""))
                     settings.set(name, value);
@@ -395,16 +405,14 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
                 FramedSource source(from);
                 // TODO this is essentially RemoteStore::addCAToStore. Move it up to Store.
                 return std::visit(overloaded {
-                    [&](TextHashMethod &_) {
+                    [&](TextHashMethod &) {
                         // We could stream this by changing Store
                         std::string contents = source.drain();
                         auto path = store->addTextToStore(name, contents, refs, repair);
                         return store->queryPathInfo(path);
                     },
-                    [&](FixedOutputHashMethod &fohm) {
-                        if (!refs.empty())
-                            throw UnimplementedError("cannot yet have refs with flat or nar-hashed data");
-                        auto path = store->addToStoreFromDump(source, name, fohm.fileIngestionMethod, fohm.hashType, repair);
+                    [&](FixedOutputHashMethod & fohm) {
+                        auto path = store->addToStoreFromDump(source, name, fohm.fileIngestionMethod, fohm.hashType, repair, refs);
                         return store->queryPathInfo(path);
                     },
                 }, contentAddressMethod);
@@ -432,25 +440,30 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
                 hashAlgo = parseHashType(hashAlgoRaw);
             }
 
-            StringSink saved;
-            TeeSource savedNARSource(from, saved);
-            RetrieveRegularNARSink savedRegular { saved };
-
-            if (method == FileIngestionMethod::Recursive) {
-                /* Get the entire NAR dump from the client and save it to
-                  a string so that we can pass it to
-                  addToStoreFromDump(). */
-                ParseSink sink; /* null sink; just parse the NAR */
-                parseDump(sink, savedNARSource);
-            } else
-                parseDump(savedRegular, from);
-
+            auto dumpSource = sinkToSource([&](Sink & saved) {
+                if (method == FileIngestionMethod::Recursive) {
+                    /* We parse the NAR dump through into `saved` unmodified,
+                       so why all this extra work? We still parse the NAR so
+                       that we aren't sending arbitrary data to `saved`
+                       unwittingly`, and we know when the NAR ends so we don't
+                       consume the rest of `from` and can't parse another
+                       command. (We don't trust `addToStoreFromDump` to not
+                       eagerly consume the entire stream it's given, past the
+                       length of the Nar. */
+                    TeeSource savedNARSource(from, saved);
+                    ParseSink sink; /* null sink; just parse the NAR */
+                    parseDump(sink, savedNARSource);
+                } else {
+                    /* Incrementally parse the NAR file, stripping the
+                       metadata, and streaming the sole file we expect into
+                       `saved`. */
+                    RetrieveRegularNARSink savedRegular { saved };
+                    parseDump(savedRegular, from);
+                    if (!savedRegular.regular) throw Error("regular file expected");
+                }
+            });
             logger->startWork();
-            if (!savedRegular.regular) throw Error("regular file expected");
-
-            // FIXME: try to stream directly from `from`.
-            StringSource dumpSource { *saved.s };
-            auto path = store->addToStoreFromDump(dumpSource, baseName, method, hashAlgo);
+            auto path = store->addToStoreFromDump(*dumpSource, baseName, method, hashAlgo);
             logger->stopWork();
 
             to << store->printStorePath(path);
@@ -465,17 +478,19 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
             dontCheckSigs = false;
 
         logger->startWork();
-        FramedSource source(from);
-        store->addMultipleToStore(source,
-            RepairFlag{repair},
-            dontCheckSigs ? NoCheckSigs : CheckSigs);
+        {
+            FramedSource source(from);
+            store->addMultipleToStore(source,
+                RepairFlag{repair},
+                dontCheckSigs ? NoCheckSigs : CheckSigs);
+        }
         logger->stopWork();
         break;
     }
 
     case wopAddTextToStore: {
-        string suffix = readString(from);
-        string s = readString(from);
+        std::string suffix = readString(from);
+        std::string s = readString(from);
         auto refs = worker_proto::read(*store, from, Phantom<StorePathSet> {});
         logger->startWork();
         auto path = store->addTextToStore(suffix, s, refs, NoRepair);
@@ -514,7 +529,14 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
             mode = (BuildMode) readInt(from);
 
             /* Repairing is not atomic, so disallowed for "untrusted"
-               clients.  */
+               clients.
+
+               FIXME: layer violation in this message: the daemon code (i.e.
+               this file) knows whether a client/connection is trusted, but it
+               does not how how the client was authenticated. The mechanism
+               need not be getting the UID of the other end of a Unix Domain
+               Socket.
+              */
             if (mode == bmRepair && !trusted)
                 throw Error("repairing is not allowed because you are not in 'trusted-users'");
         }
@@ -525,12 +547,35 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         break;
     }
 
+    case wopBuildPathsWithResults: {
+        auto drvs = readDerivedPaths(*store, clientVersion, from);
+        BuildMode mode = bmNormal;
+        mode = (BuildMode) readInt(from);
+
+        /* Repairing is not atomic, so disallowed for "untrusted"
+           clients.
+
+           FIXME: layer violation; see above. */
+        if (mode == bmRepair && !trusted)
+            throw Error("repairing is not allowed because you are not in 'trusted-users'");
+
+        logger->startWork();
+        auto results = store->buildPathsWithResults(drvs, mode);
+        logger->stopWork();
+
+        worker_proto::write(*store, to, results);
+
+        break;
+    }
+
     case wopBuildDerivation: {
         auto drvPath = store->parseStorePath(readString(from));
         BasicDerivation drv;
         readDerivation(from, *store, drv, Derivation::nameFromPath(drvPath));
         BuildMode buildMode = (BuildMode) readInt(from);
         logger->startWork();
+
+        auto drvType = drv.type();
 
         /* Content-addressed derivations are trustless because their output paths
            are verified by their content alone, so any derivation is free to
@@ -564,12 +609,12 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
            derivations, we throw out the precomputed output paths and just
            store the hashes, so there aren't two competing sources of truth an
            attacker could exploit. */
-        if (drv.type() == DerivationType::InputAddressed && !trusted)
+        if (!(drvType.isCA() || trusted))
             throw Error("you are not privileged to build input-addressed derivations");
 
         /* Make sure that the non-input-addressed derivations that got this far
            are in fact content-addressed if we don't trust them. */
-        assert(derivationIsCA(drv.type()) || trusted);
+        assert(drvType.isCA() || trusted);
 
         /* Recompute the derivation path when we cannot trust the original. */
         if (!trusted) {
@@ -578,7 +623,7 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
                original not-necessarily-resolved derivation to verify the drv
                derivation as adequate claim to the input-addressed output
                paths. */
-            assert(derivationIsCA(drv.type()));
+            assert(drvType.isCA());
 
             Derivation drv2;
             static_cast<BasicDerivation &>(drv2) = drv;
@@ -617,16 +662,19 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
 
     case wopAddIndirectRoot: {
         Path path = absPath(readString(from));
+
         logger->startWork();
-        store->addIndirectRoot(path);
+        auto & gcStore = require<GcStore>(*store);
+        gcStore.addIndirectRoot(path);
         logger->stopWork();
+
         to << 1;
         break;
     }
 
+    // Obsolete.
     case wopSyncWithGC: {
         logger->startWork();
-        store->syncWithGC();
         logger->stopWork();
         to << 1;
         break;
@@ -634,7 +682,8 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
 
     case wopFindRoots: {
         logger->startWork();
-        Roots roots = store->findRoots(!trusted);
+        auto & gcStore = require<GcStore>(*store);
+        Roots roots = gcStore.findRoots(!trusted);
         logger->stopWork();
 
         size_t size = 0;
@@ -665,7 +714,8 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         logger->startWork();
         if (options.ignoreLiveness)
             throw Error("you are not allowed to ignore liveness");
-        store->collectGarbage(options, results);
+        auto & gcStore = require<GcStore>(*store);
+        gcStore.collectGarbage(options, results);
         logger->stopWork();
 
         to << results.paths << results.bytesFreed << 0 /* obsolete */;
@@ -693,8 +743,8 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         if (GET_PROTOCOL_MINOR(clientVersion) >= 12) {
             unsigned int n = readInt(from);
             for (unsigned int i = 0; i < n; i++) {
-                string name = readString(from);
-                string value = readString(from);
+                auto name = readString(from);
+                auto value = readString(from);
                 clientSettings.overrides.emplace(name, value);
             }
         }
@@ -849,14 +899,14 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
 
         else {
             std::unique_ptr<Source> source;
+            StringSink saved;
             if (GET_PROTOCOL_MINOR(clientVersion) >= 21)
                 source = std::make_unique<TunnelSource>(from, to);
             else {
-                StringSink saved;
                 TeeSource tee { from, saved };
                 ParseSink ether;
                 parseDump(ether, tee);
-                source = std::make_unique<StringSource>(std::move(*saved.s));
+                source = std::make_unique<StringSource>(saved.s);
             }
 
             logger->startWork();
@@ -917,6 +967,23 @@ static void performOp(TunnelLogger * logger, ref<Store> store,
         break;
     }
 
+    case wopAddBuildLog: {
+        StorePath path{readString(from)};
+        logger->startWork();
+        if (!trusted)
+            throw Error("you are not privileged to add logs");
+        auto & logStore = require<LogStore>(*store);
+        {
+            FramedSource source(from);
+            StringSink sink;
+            source.drainInto(sink);
+            logStore.addBuildLog(path, sink.s);
+        }
+        logger->stopWork();
+        to << 1;
+        break;
+    }
+
     default:
         throw Error("invalid operation %1%", op);
     }
@@ -927,8 +994,7 @@ void processConnection(
     FdSource & from,
     FdSink & to,
     TrustedFlag trusted,
-    RecursiveFlag recursive,
-    std::function<void(Store &)> authHook)
+    RecursiveFlag recursive)
 {
     auto monitor = !recursive ? std::make_unique<MonitorFdHup>(from.fd) : nullptr;
 
@@ -952,24 +1018,24 @@ void processConnection(
 
     Finally finally([&]() {
         _isInterrupted = false;
-        prevLogger->log(lvlDebug, fmt("%d operations", opCount));
+        printMsgUsing(prevLogger, lvlDebug, "%d operations", opCount);
     });
 
     if (GET_PROTOCOL_MINOR(clientVersion) >= 14 && readInt(from)) {
-        auto affinity = readInt(from);
-        setAffinityTo(affinity);
+        // Obsolete CPU affinity.
+        readInt(from);
     }
 
-    readInt(from); // obsolete reserveSpace
+    if (GET_PROTOCOL_MINOR(clientVersion) >= 11)
+        readInt(from); // obsolete reserveSpace
+
+    if (GET_PROTOCOL_MINOR(clientVersion) >= 33)
+        to << nixVersion;
 
     /* Send startup error messages to the client. */
     tunnelLogger->startWork();
 
     try {
-
-        /* If we can't accept clientVersion, then throw an error
-           *here* (not above). */
-        authHook(*store);
 
         tunnelLogger->stopWork();
         to.flush();
@@ -984,6 +1050,8 @@ void processConnection(
             } catch (EndOfFile & e) {
                 break;
             }
+
+            printMsgUsing(prevLogger, lvlDebug, "received daemon op %d", op);
 
             opCount++;
 

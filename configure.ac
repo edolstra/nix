@@ -41,8 +41,6 @@ AC_DEFINE_UNQUOTED(SYSTEM, ["$system"], [platform identifier ('cpu-os')])
 test "$localstatedir" = '${prefix}/var' && localstatedir=/nix/var
 
 
-CFLAGS=
-CXXFLAGS=
 AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_CPP
@@ -147,6 +145,20 @@ if test "x$GCC_ATOMIC_BUILTINS_NEED_LIBATOMIC" = xyes; then
     LDFLAGS="-latomic $LDFLAGS"
 fi
 
+# LTO is currently broken with clang for unknown reasons; ld segfaults in the llvm plugin
+AC_ARG_ENABLE(lto, AS_HELP_STRING([--enable-lto],[Enable LTO (only supported with GCC) [default=no]]),
+  lto=$enableval, lto=no)
+if test "$lto" = yes; then
+    if $CXX --version | grep -q GCC; then
+        AC_SUBST(CXXLTO, [-flto=jobserver])
+    else
+        echo "error: LTO is only supported with GCC at the moment" >&2
+        exit 1
+    fi
+else
+    AC_SUBST(CXXLTO, [""])
+fi
+
 PKG_PROG_PKG_CONFIG
 
 AC_ARG_ENABLE(shared, AS_HELP_STRING([--enable-shared],[Build shared libraries for Nix [default=yes]]),
@@ -163,7 +175,7 @@ fi
 PKG_CHECK_MODULES([OPENSSL], [libcrypto], [CXXFLAGS="$OPENSSL_CFLAGS $CXXFLAGS"])
 
 
-# Checks for libarchive
+# Look for libarchive.
 PKG_CHECK_MODULES([LIBARCHIVE], [libarchive >= 3.1.2], [CXXFLAGS="$LIBARCHIVE_CFLAGS $CXXFLAGS"])
 # Workaround until https://github.com/libarchive/libarchive/issues/1446 is fixed
 if test "$shared" != yes; then
@@ -188,17 +200,24 @@ PKG_CHECK_MODULES([EDITLINE], [libeditline], [CXXFLAGS="$EDITLINE_CFLAGS $CXXFLA
     [AC_MSG_ERROR([Nix requires libeditline; it was not found via pkg-config, but via its header, but required functions do not work. Maybe it is too old? >= 1.14 is required.])])
 ])
 
-# Look for libsodium, an optional dependency.
+# Look for libsodium.
 PKG_CHECK_MODULES([SODIUM], [libsodium], [CXXFLAGS="$SODIUM_CFLAGS $CXXFLAGS"])
 
 # Look for libbrotli{enc,dec}.
 PKG_CHECK_MODULES([LIBBROTLI], [libbrotlienc libbrotlidec], [CXXFLAGS="$LIBBROTLI_CFLAGS $CXXFLAGS"])
 
 # Look for libcpuid.
+have_libcpuid=
 if test "$machine_name" = "x86_64"; then
-  PKG_CHECK_MODULES([LIBCPUID], [libcpuid], [CXXFLAGS="$LIBCPUID_CFLAGS $CXXFLAGS"])
-  have_libcpuid=1
-  AC_DEFINE([HAVE_LIBCPUID], [1], [Use libcpuid])
+    AC_ARG_ENABLE([cpuid],
+                  AS_HELP_STRING([--disable-cpuid], [Do not determine microarchitecture levels with libcpuid (relevant to x86_64 only)]))
+    if test "x$enable_cpuid" != "xno"; then
+      PKG_CHECK_MODULES([LIBCPUID], [libcpuid],
+        [CXXFLAGS="$LIBCPUID_CFLAGS $CXXFLAGS"
+         have_libcpuid=1
+         AC_DEFINE([HAVE_LIBCPUID], [1], [Use libcpuid])]
+      )
+    fi
 fi
 AC_SUBST(HAVE_LIBCPUID, [$have_libcpuid])
 
@@ -255,13 +274,26 @@ fi
 PKG_CHECK_MODULES([GTEST], [gtest_main])
 
 
+# Look for rapidcheck.
+# No pkg-config yet, https://github.com/emil-e/rapidcheck/issues/302
+AC_LANG_PUSH(C++)
+AC_CHECK_HEADERS([rapidcheck/gtest.h], [], [], [#include <gtest/gtest.h>])
+dnl No good for C++ libs with mangled symbols
+dnl AC_CHECK_LIB([rapidcheck], [])
+AC_LANG_POP(C++)
+
+
+# Look for nlohmann/json.
+PKG_CHECK_MODULES([NLOHMANN_JSON], [nlohmann_json >= 3.9])
+
+
 # documentation generation switch
 AC_ARG_ENABLE(doc-gen, AS_HELP_STRING([--disable-doc-gen],[disable documentation generation]),
   doc_generate=$enableval, doc_generate=yes)
 AC_SUBST(doc_generate)
 
 # Look for lowdown library.
-PKG_CHECK_MODULES([LOWDOWN], [lowdown >= 0.8.0], [CXXFLAGS="$LOWDOWN_CFLAGS $CXXFLAGS"])
+PKG_CHECK_MODULES([LOWDOWN], [lowdown >= 0.9.0], [CXXFLAGS="$LOWDOWN_CFLAGS $CXXFLAGS"])
 
 # Setuid installations.
 AC_CHECK_FUNCS([setresuid setreuid lchown])
@@ -271,18 +303,28 @@ AC_CHECK_FUNCS([setresuid setreuid lchown])
 AC_CHECK_FUNCS([strsignal posix_fallocate sysconf])
 
 
-# This is needed if bzip2 is a static library, and the Nix libraries
-# are dynamic.
-case "${host_os}" in
-  darwin*)
-    LDFLAGS="-all_load $LDFLAGS"
-    ;;
-esac
-
-
 AC_ARG_WITH(sandbox-shell, AS_HELP_STRING([--with-sandbox-shell=PATH],[path of a statically-linked shell to use as /bin/sh in sandboxes]),
   sandbox_shell=$withval)
 AC_SUBST(sandbox_shell)
+if test ${cross_compiling:-no} = no && ! test -z ${sandbox_shell+x}; then
+  AC_MSG_CHECKING([whether sandbox-shell has the standalone feature])
+  # busybox shell sometimes allows executing other busybox applets,
+  # even if they are not in the path, breaking our sandbox
+  if PATH= $sandbox_shell -c "busybox" 2>&1 | grep -qv "not found"; then
+    AC_MSG_RESULT(enabled)
+    AC_MSG_ERROR([Please disable busybox FEATURE_SH_STANDALONE])
+  else
+    AC_MSG_RESULT(disabled)
+  fi
+fi
+
+AC_ARG_ENABLE(embedded-sandbox-shell, AS_HELP_STRING([--enable-embedded-sandbox-shell],[include the sandbox shell in the Nix binary [default=no]]),
+  embedded_sandbox_shell=$enableval, embedded_sandbox_shell=no)
+AC_SUBST(embedded_sandbox_shell)
+if test "$embedded_sandbox_shell" = yes; then
+  AC_DEFINE(HAVE_EMBEDDED_SANDBOX_SHELL, 1, [Include the sandbox shell in the Nix binary.])
+fi
+
 
 # Expand all variables in config.status.
 test "$prefix" = NONE && prefix=$ac_default_prefix

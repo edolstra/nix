@@ -36,7 +36,6 @@ Settings::Settings()
     , nixStateDir(canonPath(getEnv("NIX_STATE_DIR").value_or(NIX_STATE_DIR)))
     , nixConfDir(canonPath(getEnv("NIX_CONF_DIR").value_or(NIX_CONF_DIR)))
     , nixUserConfFiles(getUserConfigFiles())
-    , nixLibexecDir(canonPath(getEnv("NIX_LIBEXEC_DIR").value_or(NIX_LIBEXEC_DIR)))
     , nixBinDir(canonPath(getEnv("NIX_BIN_DIR").value_or(NIX_BIN_DIR)))
     , nixManDir(canonPath(NIX_MAN_DIR))
     , nixDaemonSocketFile(canonPath(getEnv("NIX_DAEMON_SOCKET_PATH").value_or(nixStateDir + DEFAULT_SOCKET_PATH)))
@@ -67,12 +66,13 @@ Settings::Settings()
     sandboxPaths = tokenizeString<StringSet>("/bin/sh=" SANDBOX_SHELL);
 #endif
 
-
-/* chroot-like behavior from Apple's sandbox */
+    /* chroot-like behavior from Apple's sandbox */
 #if __APPLE__
     sandboxPaths = tokenizeString<StringSet>("/System/Library/Frameworks /System/Library/PrivateFrameworks /bin/sh /bin/bash /private/tmp /private/var/tmp /usr/lib");
     allowedImpureHostPrefixes = tokenizeString<StringSet>("/System/Library /usr/lib /dev /bin/sh");
 #endif
+
+    buildHook = getSelfExe().value_or("nix") + " __build-remote";
 }
 
 void loadConfFile()
@@ -100,7 +100,7 @@ std::vector<Path> getUserConfigFiles()
     // Use the paths specified in NIX_USER_CONF_FILES if it has been defined
     auto nixConfFiles = getEnv("NIX_USER_CONF_FILES");
     if (nixConfFiles.has_value()) {
-        return tokenizeString<std::vector<string>>(nixConfFiles.value(), ":");
+        return tokenizeString<std::vector<std::string>>(nixConfFiles.value(), ":");
     }
 
     // Use the paths specified by the XDG spec
@@ -114,7 +114,13 @@ std::vector<Path> getUserConfigFiles()
 
 unsigned int Settings::getDefaultCores()
 {
-    return std::max(1U, std::thread::hardware_concurrency());
+    const unsigned int concurrency = std::max(1U, std::thread::hardware_concurrency());
+    const unsigned int maxCPU = getMaxCPU();
+
+    if (maxCPU > 0)
+      return maxCPU;
+    else
+      return concurrency;
 }
 
 StringSet Settings::getDefaultSystemFeatures()
@@ -122,7 +128,11 @@ StringSet Settings::getDefaultSystemFeatures()
     /* For backwards compatibility, accept some "features" that are
        used in Nixpkgs to route builds to certain machines but don't
        actually require anything special on the machines. */
-    StringSet features{"nixos-test", "benchmark", "big-parallel", "recursive-nix"};
+    StringSet features{"nixos-test", "benchmark", "big-parallel"};
+
+    #if __linux__
+    features.insert("uid-range");
+    #endif
 
     #if __linux__
     if (access("/dev/kvm", R_OK | W_OK) == 0)
@@ -148,32 +158,24 @@ StringSet Settings::getDefaultExtraPlatforms()
     // machines. Note that we can’t force processes from executing
     // x86_64 in aarch64 environments or vice versa since they can
     // always exec with their own binary preferences.
-    if (pathExists("/Library/Apple/System/Library/LaunchDaemons/com.apple.oahd.plist")) {
-        if (std::string{SYSTEM} == "x86_64-darwin")
-            extraPlatforms.insert("aarch64-darwin");
-        else if (std::string{SYSTEM} == "aarch64-darwin")
-            extraPlatforms.insert("x86_64-darwin");
-    }
+    if (std::string{SYSTEM} == "aarch64-darwin" &&
+        runProgram(RunOptions {.program = "arch", .args = {"-arch", "x86_64", "/usr/bin/true"}, .mergeStderrToStdout = true}).first == 0)
+        extraPlatforms.insert("x86_64-darwin");
 #endif
 
     return extraPlatforms;
 }
 
-bool Settings::isExperimentalFeatureEnabled(const std::string & name)
+bool Settings::isExperimentalFeatureEnabled(const ExperimentalFeature & feature)
 {
     auto & f = experimentalFeatures.get();
-    return std::find(f.begin(), f.end(), name) != f.end();
+    return std::find(f.begin(), f.end(), feature) != f.end();
 }
 
-MissingExperimentalFeature::MissingExperimentalFeature(std::string feature)
-    : Error("experimental Nix feature '%1%' is disabled; use '--extra-experimental-features %1%' to override", feature)
-    , missingFeature(feature)
-    {}
-
-void Settings::requireExperimentalFeature(const std::string & name)
+void Settings::requireExperimentalFeature(const ExperimentalFeature & feature)
 {
-    if (!isExperimentalFeatureEnabled(name))
-        throw MissingExperimentalFeature(name);
+    if (!isExperimentalFeatureEnabled(feature))
+        throw MissingExperimentalFeature(feature);
 }
 
 bool Settings::isWSL1()
@@ -185,7 +187,7 @@ bool Settings::isWSL1()
     return hasSuffix(utsbuf.release, "-Microsoft");
 }
 
-const string nixVersion = PACKAGE_VERSION;
+const std::string nixVersion = PACKAGE_VERSION;
 
 NLOHMANN_JSON_SERIALIZE_ENUM(SandboxMode, {
     {SandboxMode::smEnabled, true},
@@ -220,19 +222,19 @@ template<> void BaseSetting<SandboxMode>::convertToArg(Args & args, const std::s
         .longName = name,
         .description = "Enable sandboxing.",
         .category = category,
-        .handler = {[=]() { override(smEnabled); }}
+        .handler = {[this]() { override(smEnabled); }}
     });
     args.addFlag({
         .longName = "no-" + name,
         .description = "Disable sandboxing.",
         .category = category,
-        .handler = {[=]() { override(smDisabled); }}
+        .handler = {[this]() { override(smDisabled); }}
     });
     args.addFlag({
         .longName = "relaxed-" + name,
         .description = "Enable sandboxing, but allow builds to disable it.",
         .category = category,
-        .handler = {[=]() { override(smRelaxed); }}
+        .handler = {[this]() { override(smRelaxed); }}
     });
 }
 
@@ -288,5 +290,19 @@ void initPlugins()
     /* Tell the user if they try to set plugin-files after we've already loaded */
     settings.pluginFiles.pluginsLoaded = true;
 }
+
+static bool initLibStoreDone = false;
+
+void assertLibStoreInitialized() {
+    if (!initLibStoreDone) {
+        printError("The program must call nix::initNix() before calling any libstore library functions.");
+        abort();
+    };
+}
+
+void initLibStore() {
+    initLibStoreDone = true;
+}
+
 
 }

@@ -25,6 +25,8 @@ public:
     /* Return a short one-line description of the command. */
     virtual std::string description() { return ""; }
 
+    virtual bool forceImpureByDefault() { return false; }
+
     /* Return documentation about this command, in Markdown format. */
     virtual std::string doc() { return ""; }
 
@@ -146,6 +148,11 @@ protected:
        argument (if any) have been processed. */
     virtual void initialFlagsProcessed() {}
 
+    /* Called after the command line has been processed if we need to generate
+       completions. Useful for commands that need to know the whole command line
+       in order to know what completions to generate. */
+    virtual void completionHook() { }
+
 public:
 
     void addFlag(Flag && flag);
@@ -158,7 +165,7 @@ public:
     }
 
     /* Expect a string argument. */
-    void expectArg(const std::string & label, string * dest, bool optional = false)
+    void expectArg(const std::string & label, std::string * dest, bool optional = false)
     {
         expectArgs({
             .label = label,
@@ -221,6 +228,8 @@ public:
 
     bool processArgs(const Strings & args, bool finish) override;
 
+    void completionHook() override;
+
     nlohmann::json toJSON() override;
 };
 
@@ -237,7 +246,13 @@ public:
     void add(std::string completion, std::string description = "");
 };
 extern std::shared_ptr<Completions> completions;
-extern bool pathCompletions;
+
+enum CompletionType {
+    ctNormal,
+    ctFilenames,
+    ctAttrs
+};
+extern CompletionType completionType;
 
 std::optional<std::string> needsCompletion(std::string_view s);
 

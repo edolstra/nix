@@ -3,7 +3,7 @@
 source common.sh
 
 drv=$(nix-instantiate --experimental-features ca-derivations ./content-addressed.nix -A rootCA --arg seed 1)
-nix --experimental-features 'nix-command ca-derivations' show-derivation --derivation "$drv" --arg seed 1
+nix --experimental-features 'nix-command ca-derivations' show-derivation "$drv" --arg seed 1
 
 buildAttr () {
     local derivationPath=$1
@@ -37,7 +37,7 @@ testCutoffFor () {
 }
 
 testCutoff () {
-    # Don't directly build depenentCA, that way we'll make sure we dodn't rely on
+    # Don't directly build dependentCA, that way we'll make sure we don't rely on
     # dependent derivations always being already built.
     #testDerivation dependentCA
     testCutoffFor transitivelyDependentCA

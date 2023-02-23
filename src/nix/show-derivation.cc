@@ -5,10 +5,11 @@
 #include "common-args.hh"
 #include "store-api.hh"
 #include "archive.hh"
-#include "json.hh"
 #include "derivations.hh"
+#include <nlohmann/json.hpp>
 
 using namespace nix;
+using json = nlohmann::json;
 
 struct CmdShowDerivation : InstallablesCommand
 {
@@ -40,7 +41,7 @@ struct CmdShowDerivation : InstallablesCommand
 
     void run(ref<Store> store) override
     {
-        auto drvPaths = toDerivations(store, installables, true);
+        auto drvPaths = Installable::toDerivations(store, installables, true);
 
         if (recursive) {
             StorePathSet closure;
@@ -48,73 +49,15 @@ struct CmdShowDerivation : InstallablesCommand
             drvPaths = std::move(closure);
         }
 
-        {
-
-        JSONObject jsonRoot(std::cout, true);
+        json jsonRoot = json::object();
 
         for (auto & drvPath : drvPaths) {
             if (!drvPath.isDerivation()) continue;
 
-            auto drvObj(jsonRoot.object(store->printStorePath(drvPath)));
-
-            auto drv = store->readDerivation(drvPath);
-
-            {
-                auto outputsObj(drvObj.object("outputs"));
-                for (auto & [_outputName, output] : drv.outputs) {
-                    auto & outputName = _outputName; // work around clang bug
-                    auto outputObj { outputsObj.object(outputName) };
-                    std::visit(overloaded {
-                        [&](DerivationOutputInputAddressed doi) {
-                            outputObj.attr("path", store->printStorePath(doi.path));
-                        },
-                        [&](DerivationOutputCAFixed dof) {
-                            outputObj.attr("path", store->printStorePath(dof.path(*store, drv.name, outputName)));
-                            outputObj.attr("hashAlgo", dof.hash.printMethodAlgo());
-                            outputObj.attr("hash", dof.hash.hash.to_string(Base16, false));
-                        },
-                        [&](DerivationOutputCAFloating dof) {
-                            outputObj.attr("hashAlgo", makeFileIngestionPrefix(dof.method) + printHashType(dof.hashType));
-                        },
-                        [&](DerivationOutputDeferred) {},
-                    }, output.output);
-                }
-            }
-
-            {
-                auto inputsList(drvObj.list("inputSrcs"));
-                for (auto & input : drv.inputSrcs)
-                    inputsList.elem(store->printStorePath(input));
-            }
-
-            {
-                auto inputDrvsObj(drvObj.object("inputDrvs"));
-                for (auto & input : drv.inputDrvs) {
-                    auto inputList(inputDrvsObj.list(store->printStorePath(input.first)));
-                    for (auto & outputId : input.second)
-                        inputList.elem(outputId);
-                }
-            }
-
-            drvObj.attr("system", drv.platform);
-            drvObj.attr("builder", drv.builder);
-
-            {
-                auto argsList(drvObj.list("args"));
-                for (auto & arg : drv.args)
-                    argsList.elem(arg);
-            }
-
-            {
-                auto envObj(drvObj.object("env"));
-                for (auto & var : drv.env)
-                    envObj.attr(var.first, var.second);
-            }
+            jsonRoot[store->printStorePath(drvPath)] =
+                store->readDerivation(drvPath).toJSON(*store);
         }
-
-        }
-
-        std::cout << "\n";
+        std::cout << jsonRoot.dump(2) << std::endl;
     }
 };
 

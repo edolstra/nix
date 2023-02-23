@@ -53,6 +53,15 @@ struct TCPStore : public virtual TCPStoreConfig, public virtual RemoteStore
     bool sameMachine() override
     { return false; }
 
+    struct Connection : RemoteStore::Connection
+    {
+        AutoCloseFD fd;
+        void closeWrite() override
+        {
+            shutdown(fd.get(), SHUT_WR);
+        }
+    };
+
     ref<RemoteStore::Connection> openConnection() override
     {
         auto conn = make_ref<Connection>();
@@ -100,6 +109,10 @@ struct TCPStore : public virtual TCPStoreConfig, public virtual RemoteStore
 
         throw Error("could not connect to daemon at '%s': %s", host, err);
     }
+
+    // FIXME extend daemon protocol, move implementation to RemoteStore
+    std::optional<std::string> getBuildLogExact(const StorePath & path) override
+    { unsupported("getBuildLogExact"); }
 };
 
 static RegisterStoreImplementation<TCPStore, TCPStoreConfig> regTCPStore;

@@ -36,6 +36,43 @@
 using namespace nix;
 using namespace nix::daemon;
 
+struct AuthorizationSettings : Config {
+
+    Setting<Strings> trustedUsers{
+        this, {"root"}, "trusted-users",
+        R"(
+          A list of names of users (separated by whitespace) that have
+          additional rights when connecting to the Nix daemon, such as the
+          ability to specify additional binary caches, or to import unsigned
+          NARs. You can also specify groups by prefixing them with `@`; for
+          instance, `@wheel` means all users in the `wheel` group. The default
+          is `root`.
+
+          > **Warning**
+          >
+          > Adding a user to `trusted-users` is essentially equivalent to
+          > giving that user root access to the system. For example, the user
+          > can set `sandbox-paths` and thereby obtain read access to
+          > directories that are otherwise inacessible to them.
+        )"};
+
+    /* ?Who we trust to use the daemon in safe ways */
+    Setting<Strings> allowedUsers{
+        this, {"*"}, "allowed-users",
+        R"(
+          A list of names of users (separated by whitespace) that are allowed
+          to connect to the Nix daemon. As with the `trusted-users` option,
+          you can specify groups by prefixing them with `@`. Also, you can
+          allow all users by specifying `*`. The default is `*`.
+
+          Note that trusted users are always allowed to connect.
+        )"};
+};
+
+AuthorizationSettings authorizationSettings;
+
+static GlobalConfig::Register rSettings(&authorizationSettings);
+
 #ifndef __linux__
 #define SPLICE_F_MOVE 0
 static ssize_t splice(int fd_in, void *off_in, int fd_out, void *off_out, size_t len, unsigned int flags)
@@ -78,7 +115,7 @@ static void setSigChldAction(bool autoReap)
 }
 
 
-bool matchUser(const string & user, const string & group, const Strings & users)
+bool matchUser(const std::string & user, const std::string & group, const Strings & users)
 {
     if (find(users.begin(), users.end(), "*") != users.end())
         return true;
@@ -87,25 +124,29 @@ bool matchUser(const string & user, const string & group, const Strings & users)
         return true;
 
     for (auto & i : users)
-        if (string(i, 0, 1) == "@") {
-            if (group == string(i, 1)) return true;
+        if (i.substr(0, 1) == "@") {
+            if (group == i.substr(1)) return true;
             struct group * gr = getgrnam(i.c_str() + 1);
             if (!gr) continue;
             for (char * * mem = gr->gr_mem; *mem; mem++)
-                if (user == string(*mem)) return true;
+                if (user == std::string(*mem)) return true;
         }
 
     return false;
 }
 
 
+struct TcpAddr {
+    std::string ip;
+    std::string port;
+};
+
 struct PeerInfo
 {
     std::optional<pid_t> pid;
     std::optional<uid_t> uid;
     std::optional<gid_t> gid;
-    std::optional<std::string> ip;
-    std::optional<std::string> port;
+    std::optional<TcpAddr> tcpAddr;
 };
 
 
@@ -145,8 +186,10 @@ static PeerInfo getPeerInfo(int fd)
         char host[1024];
         char serv[128];
         if (getnameinfo((sockaddr *) &addr, addrlen, host, sizeof(host), serv, sizeof(serv), NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
-            peer.ip = std::string(host);
-            peer.port = std::string(serv);
+            peer.tcpAddr = {
+                .ip = std::string(host),
+                .port = std::string(serv),
+            };
         }
     }
 
@@ -183,8 +226,8 @@ static void authConnection(FdSource & from, FdSink & to)
         group = gr ? gr->gr_name : std::to_string(*peer.gid);
     }
 
-    Strings trustedUsers = settings.trustedUsers;
-    Strings allowedUsers = settings.allowedUsers;
+    Strings trustedUsers = authorizationSettings.trustedUsers;
+    Strings allowedUsers = authorizationSettings.allowedUsers;
 
     if (matchUser(user, group, trustedUsers))
         trusted = Trusted;
@@ -194,8 +237,8 @@ static void authConnection(FdSource & from, FdSink & to)
 
     printInfo(
         "accepted connection from %s%s",
-        peer.ip
-        ? fmt("%s:%s", *peer.ip, *peer.port)
+        peer.tcpAddr
+        ? fmt("%s:%s", peer.tcpAddr->ip, peer.tcpAddr->port)
         : peer.pid && peer.uid
         ? fmt("pid %s, user %s", std::to_string(*peer.pid), user)
         : "<unknown>",
@@ -203,15 +246,12 @@ static void authConnection(FdSource & from, FdSink & to)
 
     // For debugging, stuff the pid into argv[1].
     if (peer.pid && savedArgv[1]) {
-        string processName = std::to_string(*peer.pid);
+        std::string processName = std::to_string(*peer.pid);
         strncpy(savedArgv[1], processName.c_str(), strlen(savedArgv[1]));
     }
 
     // Handle the connection.
-    processConnection(openUncachedStore(), from, to, trusted, NotRecursive, [&](Store & store) {
-        if (peer.uid)
-            store.createUser(user, *peer.uid);
-    });
+    processConnection(openUncachedStore(), from, to, trusted, NotRecursive);
 }
 
 
@@ -219,9 +259,6 @@ static void daemonLoop()
 {
     if (chdir("/") == -1)
         throw SysError("cannot change current directory");
-
-    // Get rid of children automatically; don't let them become zombies.
-    setSigChldAction(true);
 
     std::vector<AutoCloseFD> listeningSockets;
 
@@ -248,6 +285,9 @@ static void daemonLoop()
     std::vector<struct pollfd> fds;
     for (auto & i : listeningSockets)
         fds.push_back({.fd = i.get(), .events = POLLIN});
+
+    //  Get rid of children automatically; don't let them become zombies.
+    setSigChldAction(true);
 
     // Loop accepting connections.
     while (1) {
@@ -302,7 +342,7 @@ static void daemonLoop()
         } catch (Interrupted & e) {
             return;
         } catch (Error & error) {
-            ErrorInfo ei = error.info();
+            auto ei = error.info();
             // FIXME: add to trace?
             ei.msg = hintfmt("error processing connection: %1%", ei.msg.str());
             logError(ei);
@@ -347,7 +387,7 @@ static void runDaemon(bool stdio, bool auth)
             if (auth)
                 authConnection(from, to);
             else
-                processConnection(openUncachedStore(), from, to, Trusted, NotRecursive, [&](Store & _) {});
+                processConnection(openUncachedStore(), from, to, Trusted, NotRecursive);
         }
     } else
         daemonLoop();

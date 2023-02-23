@@ -1,6 +1,7 @@
 #include "config.hh"
 #include "args.hh"
 #include "abstract-setting-to-json.hh"
+#include "experimental-features.hh"
 
 #include <nlohmann/json.hpp>
 
@@ -80,16 +81,16 @@ void AbstractConfig::applyConfig(const std::string & contents, const std::string
     unsigned int pos = 0;
 
     while (pos < contents.size()) {
-        string line;
+        std::string line;
         while (pos < contents.size() && contents[pos] != '\n')
             line += contents[pos++];
         pos++;
 
-        string::size_type hash = line.find('#');
-        if (hash != string::npos)
-            line = string(line, 0, hash);
+        auto hash = line.find('#');
+        if (hash != std::string::npos)
+            line = std::string(line, 0, hash);
 
-        vector<string> tokens = tokenizeString<vector<string> >(line);
+        auto tokens = tokenizeString<std::vector<std::string>>(line);
         if (tokens.empty()) continue;
 
         if (tokens.size() < 2)
@@ -119,9 +120,9 @@ void AbstractConfig::applyConfig(const std::string & contents, const std::string
         if (tokens[1] != "=")
             throw UsageError("illegal configuration line '%1%' in '%2%'", line, path);
 
-        string name = tokens[0];
+        std::string name = tokens[0];
 
-        vector<string>::iterator i = tokens.begin();
+        auto i = tokens.begin();
         advance(i, 2);
 
         set(name, concatStringsSep(" ", Strings(i, tokens.end()))); // FIXME: slow
@@ -131,7 +132,7 @@ void AbstractConfig::applyConfig(const std::string & contents, const std::string
 void AbstractConfig::applyConfigFile(const Path & path)
 {
     try {
-        string contents = readFile(path);
+        std::string contents = readFile(path);
         applyConfig(contents, path);
     } catch (SysError &) { }
 }
@@ -177,11 +178,6 @@ AbstractSetting::AbstractSetting(
 {
 }
 
-void AbstractSetting::setDefault(const std::string & str)
-{
-    if (!overridden) set(str);
-}
-
 nlohmann::json AbstractSetting::toJSON()
 {
     return nlohmann::json(toJSONObject());
@@ -213,7 +209,7 @@ void BaseSetting<T>::convertToArg(Args & args, const std::string & category)
         .description = fmt("Set the `%s` setting.", name),
         .category = category,
         .labels = {"value"},
-        .handler = {[=](std::string s) { overridden = true; set(s); }},
+        .handler = {[this](std::string s) { overridden = true; set(s); }},
     });
 
     if (isAppendable())
@@ -222,7 +218,7 @@ void BaseSetting<T>::convertToArg(Args & args, const std::string & category)
             .description = fmt("Append to the `%s` setting.", name),
             .category = category,
             .labels = {"value"},
-            .handler = {[=](std::string s) { overridden = true; set(s, true); }},
+            .handler = {[this](std::string s) { overridden = true; set(s, true); }},
         });
 }
 
@@ -274,13 +270,13 @@ template<> void BaseSetting<bool>::convertToArg(Args & args, const std::string &
         .longName = name,
         .description = fmt("Enable the `%s` setting.", name),
         .category = category,
-        .handler = {[=]() { override(true); }}
+        .handler = {[this]() { override(true); }}
     });
     args.addFlag({
         .longName = "no-" + name,
         .description = fmt("Disable the `%s` setting.", name),
         .category = category,
-        .handler = {[=]() { override(false); }}
+        .handler = {[this]() { override(false); }}
     });
 }
 
@@ -318,6 +314,31 @@ template<> std::string BaseSetting<StringSet>::to_string() const
     return concatStringsSep(" ", value);
 }
 
+template<> void BaseSetting<std::set<ExperimentalFeature>>::set(const std::string & str, bool append)
+{
+    if (!append) value.clear();
+    for (auto & s : tokenizeString<StringSet>(str)) {
+        auto thisXpFeature = parseExperimentalFeature(s);
+        if (thisXpFeature)
+            value.insert(thisXpFeature.value());
+        else
+            warn("unknown experimental feature '%s'", s);
+    }
+}
+
+template<> bool BaseSetting<std::set<ExperimentalFeature>>::isAppendable()
+{
+    return true;
+}
+
+template<> std::string BaseSetting<std::set<ExperimentalFeature>>::to_string() const
+{
+    StringSet stringifiedXpFeatures;
+    for (auto & feature : value)
+        stringifiedXpFeatures.insert(std::string(showExperimentalFeature(feature)));
+    return concatStringsSep(" ", stringifiedXpFeatures);
+}
+
 template<> void BaseSetting<StringMap>::set(const std::string & str, bool append)
 {
     if (!append) value.clear();
@@ -353,6 +374,7 @@ template class BaseSetting<std::string>;
 template class BaseSetting<Strings>;
 template class BaseSetting<StringSet>;
 template class BaseSetting<StringMap>;
+template class BaseSetting<std::set<ExperimentalFeature>>;
 
 void PathSetting::set(const std::string & str, bool append)
 {

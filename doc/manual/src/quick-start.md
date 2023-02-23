@@ -4,34 +4,34 @@ This chapter is for impatient people who don't like reading
 documentation.  For more in-depth information you are kindly referred
 to subsequent chapters.
 
-1. Install single-user Nix by running the following:
+1. Install Nix by running the following:
 
    ```console
-   $ bash <(curl -L https://nixos.org/nix/install)
+   $ curl -L https://nixos.org/nix/install | sh
    ```
 
-   This will install Nix in `/nix`. The install script will create
-   `/nix` using `sudo`, so make sure you have sufficient rights.  (For
-   other installation methods, see
-   [here](installation/installation.md).)
+   The install script will use `sudo`, so make sure you have sufficient rights.
+   On Linux, `--daemon` can be omitted for a single-user install.
+
+   For other installation methods, see [here](installation/installation.md).
 
 1. See what installable packages are currently available in the
    channel:
 
    ```console
-   $ nix-env -qa
-   docbook-xml-4.3
-   docbook-xml-4.5
-   firefox-33.0.2
-   hello-2.9
-   libxslt-1.1.28
+   $ nix-env -qaP
+   nixpkgs.docbook_xml_dtd_43                    docbook-xml-4.3
+   nixpkgs.docbook_xml_dtd_45                    docbook-xml-4.5
+   nixpkgs.firefox                               firefox-33.0.2
+   nixpkgs.hello                                 hello-2.9
+   nixpkgs.libxslt                               libxslt-1.1.28
    …
    ```
 
 1. Install some packages from the channel:
 
    ```console
-   $ nix-env -i hello
+   $ nix-env -iA nixpkgs.hello
    ```
 
    This should download pre-built packages; it should not build them

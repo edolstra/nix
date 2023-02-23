@@ -52,11 +52,20 @@ public:
     bool sameMachine() override
     { return false; }
 
+    // FIXME extend daemon protocol, move implementation to RemoteStore
+    std::optional<std::string> getBuildLogExact(const StorePath & path) override
+    { unsupported("getBuildLogExact"); }
+
 private:
 
     struct Connection : RemoteStore::Connection
     {
         std::unique_ptr<SSHMaster::Connection> sshConn;
+
+        void closeWrite() override
+        {
+            sshConn->in.close();
+        }
     };
 
     ref<RemoteStore::Connection> openConnection() override;

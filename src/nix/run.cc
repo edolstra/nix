@@ -8,8 +8,8 @@
 #include "finally.hh"
 #include "fs-accessor.hh"
 #include "progress-bar.hh"
-#include "affinity.hh"
 #include "eval.hh"
+#include "build/personality.hh"
 
 #if __linux__
 #include <sys/mount.h>
@@ -25,7 +25,8 @@ namespace nix {
 
 void runProgramInStore(ref<Store> store,
     const std::string & program,
-    const Strings & args)
+    const Strings & args,
+    std::optional<std::string_view> system)
 {
     stopProgressBar();
 
@@ -39,16 +40,22 @@ void runProgramInStore(ref<Store> store,
        unshare(CLONE_NEWUSER) doesn't work in a multithreaded program
        (which "nix" is), so we exec() a single-threaded helper program
        (chrootHelper() below) to do the work. */
-    auto store2 = store.dynamic_pointer_cast<LocalStore>();
+    auto store2 = store.dynamic_pointer_cast<LocalFSStore>();
 
-    if (store2 && store->storeDir != store2->getRealStoreDir()) {
-        Strings helperArgs = { chrootHelperName, store->storeDir, store2->getRealStoreDir(), program };
+    if (!store2)
+        throw Error("store '%s' is not a local store so it does not support command execution", store->getUri());
+
+    if (store->storeDir != store2->getRealStoreDir()) {
+        Strings helperArgs = { chrootHelperName, store->storeDir, store2->getRealStoreDir(), std::string(system.value_or("")), program };
         for (auto & arg : args) helperArgs.push_back(arg);
 
-        execv(readLink("/proc/self/exe").c_str(), stringsToCharPtrs(helperArgs).data());
+        execv(getSelfExe().value_or("nix").c_str(), stringsToCharPtrs(helperArgs).data());
 
         throw SysError("could not execute chroot helper");
     }
+
+    if (system)
+        setPersonality(*system);
 
     execvp(program.c_str(), stringsToCharPtrs(args).data());
 
@@ -92,7 +99,7 @@ struct CmdShell : InstallablesCommand, MixEnvironment
 
     void run(ref<Store> store) override
     {
-        auto outPaths = toStorePaths(getEvalStore(), store, Realise::Outputs, OperateOn::Output, installables);
+        auto outPaths = Installable::toStorePaths(getEvalStore(), store, Realise::Outputs, OperateOn::Output, installables);
 
         auto accessor = store->getFSAccessor();
 
@@ -159,7 +166,10 @@ struct CmdRun : InstallableCommand
 
     Strings getDefaultFlakeAttrPaths() override
     {
-        Strings res{"defaultApp." + settings.thisSystem.get()};
+        Strings res{
+            "apps." + settings.thisSystem.get() + ".default",
+            "defaultApp." + settings.thisSystem.get(),
+        };
         for (auto & s : SourceExprCommand::getDefaultFlakeAttrPaths())
             res.push_back(s);
         return res;
@@ -177,6 +187,7 @@ struct CmdRun : InstallableCommand
     {
         auto state = getEvalState();
 
+        lockFlags.applyNixConfig = true;
         auto app = installable->toApp(*state).resolve(getEvalStore(), store);
 
         Strings allArgs{app.program};
@@ -193,6 +204,7 @@ void chrootHelper(int argc, char * * argv)
     int p = 1;
     std::string storeDir = argv[p++];
     std::string realStoreDir = argv[p++];
+    std::string system = argv[p++];
     std::string cmd = argv[p++];
     Strings args;
     while (p < argc)
@@ -255,6 +267,9 @@ void chrootHelper(int argc, char * * argv)
     writeFile("/proc/self/setgroups", "deny");
     writeFile("/proc/self/uid_map", fmt("%d %d %d", uid, uid, 1));
     writeFile("/proc/self/gid_map", fmt("%d %d %d", gid, gid, 1));
+
+    if (system != "")
+        setPersonality(system);
 
     execvp(cmd.c_str(), stringsToCharPtrs(args).data());
 

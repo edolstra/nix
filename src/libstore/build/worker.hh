@@ -38,7 +38,7 @@ struct Child
 {
     WeakGoalPtr goal;
     Goal * goal2; // ugly hackery
-    set<int> fds;
+    std::set<int> fds;
     bool respectTimeouts;
     bool inBuildSlot;
     steady_time_point lastOutput; /* time we last got output on stdout/stderr */
@@ -140,15 +140,15 @@ public:
     /* derivation goal */
 private:
     std::shared_ptr<DerivationGoal> makeDerivationGoalCommon(
-        const StorePath & drvPath, const StringSet & wantedOutputs,
+        const StorePath & drvPath, const OutputsSpec & wantedOutputs,
         std::function<std::shared_ptr<DerivationGoal>()> mkDrvGoal);
 public:
     std::shared_ptr<DerivationGoal> makeDerivationGoal(
         const StorePath & drvPath,
-        const StringSet & wantedOutputs, BuildMode buildMode = bmNormal);
+        const OutputsSpec & wantedOutputs, BuildMode buildMode = bmNormal);
     std::shared_ptr<DerivationGoal> makeBasicDerivationGoal(
         const StorePath & drvPath, const BasicDerivation & drv,
-        const StringSet & wantedOutputs, BuildMode buildMode = bmNormal);
+        const OutputsSpec & wantedOutputs, BuildMode buildMode = bmNormal);
 
     /* substitution goal */
     std::shared_ptr<PathSubstitutionGoal> makePathSubstitutionGoal(const StorePath & storePath, RepairFlag repair = NoRepair, std::optional<ContentAddress> ca = std::nullopt);
@@ -167,7 +167,7 @@ public:
 
     /* Registers a running child process.  `inBuildSlot' means that
        the process counts towards the jobs limit. */
-    void childStarted(GoalPtr goal, const set<int> & fds,
+    void childStarted(GoalPtr goal, const std::set<int> & fds,
         bool inBuildSlot, bool respectTimeouts);
 
     /* Unregisters a running child process.  `wakeSleepers' should be

@@ -5,6 +5,7 @@
 #include "pathlocks.hh"
 #include "store-api.hh"
 #include "local-fs-store.hh"
+#include "gc-store.hh"
 #include "sync.hh"
 #include "util.hh"
 
@@ -43,7 +44,7 @@ struct LocalStoreConfig : virtual LocalFSStoreConfig
 };
 
 
-class LocalStore : public virtual LocalStoreConfig, public virtual LocalFSStore
+class LocalStore : public virtual LocalStoreConfig, public virtual LocalFSStore, public virtual GcStore
 {
 private:
 
@@ -57,9 +58,6 @@ private:
 
         struct Stmts;
         std::unique_ptr<Stmts> stmts;
-
-        /* The file to which we write our temporary roots. */
-        AutoCloseFD fdTempRoots;
 
         /* The last time we checked whether to do an auto-GC, or an
            auto-GC finished. */
@@ -87,7 +85,6 @@ public:
     const Path linksDir;
     const Path reservedPath;
     const Path schemaPath;
-    const Path trashDir;
     const Path tempRootsDir;
     const Path fnTempRoots;
 
@@ -139,24 +136,39 @@ public:
     void addToStore(const ValidPathInfo & info, Source & source,
         RepairFlag repair, CheckSigsFlag checkSigs) override;
 
-    StorePath addToStoreFromDump(Source & dump, const string & name,
-        FileIngestionMethod method, HashType hashAlgo, RepairFlag repair) override;
+    StorePath addToStoreFromDump(Source & dump, std::string_view name,
+        FileIngestionMethod method, HashType hashAlgo, RepairFlag repair, const StorePathSet & references) override;
 
-    StorePath addTextToStore(const string & name, const string & s,
-        const StorePathSet & references, RepairFlag repair) override;
+    StorePath addTextToStore(
+        std::string_view name,
+        std::string_view s,
+        const StorePathSet & references,
+        RepairFlag repair) override;
 
     void addTempRoot(const StorePath & path) override;
 
-    void addIndirectRoot(const Path & path) override;
+private:
 
-    void syncWithGC() override;
+    void createTempRootsFile();
+
+    /* The file to which we write our temporary roots. */
+    Sync<AutoCloseFD> _fdTempRoots;
+
+    /* The global GC lock. */
+    Sync<AutoCloseFD> _fdGCLock;
+
+    /* Connection to the garbage collector. */
+    Sync<AutoCloseFD> _fdRootsSocket;
+
+public:
+
+    void addIndirectRoot(const Path & path) override;
 
 private:
 
-    typedef std::shared_ptr<AutoCloseFD> FDPtr;
-    typedef list<FDPtr> FDs;
+    void findTempRoots(Roots & roots, bool censor);
 
-    void findTempRoots(FDs & fds, Roots & roots, bool censor);
+    AutoCloseFD openGCLock();
 
 public:
 
@@ -170,8 +182,9 @@ public:
 
     void optimiseStore() override;
 
-    /* Optimise a single store path. */
-    void optimisePath(const Path & path);
+    /* Optimise a single store path. Optionally, test the encountered
+       symlinks for corruption. */
+    void optimisePath(const Path & path, RepairFlag repair);
 
     bool verifyStore(bool checkContents, RepairFlag repair) override;
 
@@ -201,11 +214,18 @@ public:
        derivation 'deriver'. */
     void registerDrvOutput(const Realisation & info) override;
     void registerDrvOutput(const Realisation & info, CheckSigsFlag checkSigs) override;
-    void cacheDrvOutputMapping(State & state, const uint64_t deriver, const string & outputName, const StorePath & output);
+    void cacheDrvOutputMapping(
+        State & state,
+        const uint64_t deriver,
+        const std::string & outputName,
+        const StorePath & output);
 
     std::optional<const Realisation> queryRealisation_(State & state, const DrvOutput & id);
     std::optional<std::pair<int64_t, Realisation>> queryRealisationCore_(State & state, const DrvOutput & id);
-    std::optional<const Realisation> queryRealisation(const DrvOutput&) override;
+    void queryRealisationUncached(const DrvOutput&,
+        Callback<std::shared_ptr<const Realisation>> callback) noexcept override;
+
+    std::optional<std::string> getVersion() override;
 
 private:
 
@@ -236,30 +256,13 @@ private:
     PathSet queryValidPathsOld();
     ValidPathInfo queryPathInfoOld(const Path & path);
 
-    struct GCState;
-
-    void deleteGarbage(GCState & state, const Path & path);
-
-    void tryToDelete(GCState & state, const Path & path);
-
-    bool canReachRoot(GCState & state, StorePathSet & visited, const StorePath & path);
-
-    void deletePathRecursive(GCState & state, const Path & path);
-
-    bool isActiveTempFile(const GCState & state,
-        const Path & path, const string & suffix);
-
-    AutoCloseFD openGCLock(LockType lockType);
-
     void findRoots(const Path & path, unsigned char type, Roots & roots);
 
     void findRootsNoTemp(Roots & roots, bool censor);
 
     void findRuntimeRoots(Roots & roots, bool censor);
 
-    void removeUnusedLinks(const GCState & state);
-
-    Path createTempDirInStore();
+    std::pair<Path, AutoCloseFD> createTempDirInStore();
 
     void checkDerivationOutputs(const StorePath & drvPath, const Derivation & drv);
 
@@ -267,7 +270,7 @@ private:
 
     InodeHash loadInodeHash();
     Strings readDirectoryIgnoringInodes(const Path & path, const InodeHash & inodeHash);
-    void optimisePath_(Activity * act, OptimiseStats & stats, const Path & path, InodeHash & inodeHash);
+    void optimisePath_(Activity * act, OptimiseStats & stats, const Path & path, InodeHash & inodeHash, RepairFlag repair);
 
     // Internal versions that are not wrapped in retry_sqlite.
     bool isValidPath_(State & state, const StorePath & path);
@@ -277,8 +280,6 @@ private:
        specified by the ‘secret-key-files’ option. */
     void signPathInfo(ValidPathInfo & info);
     void signRealisation(Realisation &);
-
-    void createUser(const std::string & userName, uid_t userId) override;
 
     // XXX: Make a generic `Store` method
     FixedOutputHash hashCAPath(
@@ -293,6 +294,8 @@ private:
         const std::string_view pathHash
     );
 
+    void addBuildLog(const StorePath & drvPath, std::string_view log) override;
+
     friend struct LocalDerivationGoal;
     friend struct PathSubstitutionGoal;
     friend struct SubstitutionGoal;
@@ -301,7 +304,7 @@ private:
 
 
 typedef std::pair<dev_t, ino_t> Inode;
-typedef set<Inode> InodesSeen;
+typedef std::set<Inode> InodesSeen;
 
 
 /* "Fix", or canonicalise, the meta-data of the files in a store path
@@ -311,9 +314,18 @@ typedef set<Inode> InodesSeen;
    - the permissions are set of 444 or 555 (i.e., read-only with or
      without execute permission; setuid bits etc. are cleared)
    - the owner and group are set to the Nix user and group, if we're
-     running as root. */
-void canonicalisePathMetaData(const Path & path, uid_t fromUid, InodesSeen & inodesSeen);
-void canonicalisePathMetaData(const Path & path, uid_t fromUid);
+     running as root.
+   If uidRange is not empty, this function will throw an error if it
+   encounters files owned by a user outside of the closed interval
+   [uidRange->first, uidRange->second].
+*/
+void canonicalisePathMetaData(
+    const Path & path,
+    std::optional<std::pair<uid_t, uid_t>> uidRange,
+    InodesSeen & inodesSeen);
+void canonicalisePathMetaData(
+    const Path & path,
+    std::optional<std::pair<uid_t, uid_t>> uidRange);
 
 void canonicaliseTimestampAndPermissions(const Path & path);
 

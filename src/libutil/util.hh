@@ -11,6 +11,9 @@
 #include <unistd.h>
 #include <signal.h>
 
+#include <boost/lexical_cast.hpp>
+
+#include <atomic>
 #include <functional>
 #include <map>
 #include <sstream>
@@ -46,32 +49,38 @@ void clearEnv();
    specified directory, or the current directory otherwise.  The path
    is also canonicalised. */
 Path absPath(Path path,
-    std::optional<Path> dir = {},
+    std::optional<PathView> dir = {},
     bool resolveSymlinks = false);
 
 /* Canonicalise a path by removing all `.' or `..' components and
    double or trailing slashes.  Optionally resolves all symlink
    components such that each component of the resulting path is *not*
    a symbolic link. */
-Path canonPath(const Path & path, bool resolveSymlinks = false);
+Path canonPath(PathView path, bool resolveSymlinks = false);
 
 /* Return the directory part of the given canonical path, i.e.,
    everything before the final `/'.  If the path is the root or an
    immediate child thereof (e.g., `/foo'), this means `/'
    is returned.*/
-Path dirOf(const Path & path);
+Path dirOf(const PathView path);
 
 /* Return the base name of the given canonical path, i.e., everything
    following the final `/' (trailing slashes are removed). */
 std::string_view baseNameOf(std::string_view path);
 
-/* Check whether 'path' is a descendant of 'dir'. */
-bool isInDir(const Path & path, const Path & dir);
+/* Perform tilde expansion on a path. */
+std::string expandTilde(std::string_view path);
 
-/* Check whether 'path' is equal to 'dir' or a descendant of 'dir'. */
-bool isDirOrInDir(const Path & path, const Path & dir);
+/* Check whether 'path' is a descendant of 'dir'. Both paths must be
+   canonicalized. */
+bool isInDir(std::string_view path, std::string_view dir);
+
+/* Check whether 'path' is equal to 'dir' or a descendant of
+   'dir'. Both paths must be canonicalized. */
+bool isDirOrInDir(std::string_view path, std::string_view dir);
 
 /* Get status of `path'. */
+struct stat stat(const Path & path);
 struct stat lstat(const Path & path);
 
 /* Return true iff the given path exists. */
@@ -87,34 +96,37 @@ bool isLink(const Path & path);
    removed. */
 struct DirEntry
 {
-    string name;
+    std::string name;
     ino_t ino;
     unsigned char type; // one of DT_*
-    DirEntry(const string & name, ino_t ino, unsigned char type)
-        : name(name), ino(ino), type(type) { }
+    DirEntry(std::string name, ino_t ino, unsigned char type)
+        : name(std::move(name)), ino(ino), type(type) { }
 };
 
-typedef vector<DirEntry> DirEntries;
+typedef std::vector<DirEntry> DirEntries;
 
 DirEntries readDirectory(const Path & path);
 
 unsigned char getFileType(const Path & path);
 
 /* Read the contents of a file into a string. */
-string readFile(int fd);
-string readFile(const Path & path);
+std::string readFile(int fd);
+std::string readFile(const Path & path);
 void readFile(const Path & path, Sink & sink);
 
 /* Write a string to a file. */
-void writeFile(const Path & path, std::string_view s, mode_t mode = 0666);
+void writeFile(const Path & path, std::string_view s, mode_t mode = 0666, bool sync = false);
 
-void writeFile(const Path & path, Source & source, mode_t mode = 0666);
+void writeFile(const Path & path, Source & source, mode_t mode = 0666, bool sync = false);
+
+/* Flush a file's parent directory to disk */
+void syncParent(const Path & path);
 
 /* Read a line from a file descriptor. */
-string readLine(int fd);
+std::string readLine(int fd);
 
 /* Write a line to a file descriptor. */
-void writeLine(int fd, string s);
+void writeLine(int fd, std::string s);
 
 /* Delete a path; i.e., in the case of a directory, it is deleted
    recursively. It's not an error if the path does not exist. The
@@ -124,6 +136,9 @@ void deletePath(const Path & path);
 void deletePath(const Path & path, uint64_t & bytesFreed);
 
 std::string getUserName();
+
+/* Return the given user's home directory from /etc/passwd. */
+Path getHomeOf(uid_t userId);
 
 /* Return $HOME or the user's home directory from /etc/passwd. */
 Path getHome();
@@ -140,9 +155,22 @@ std::vector<Path> getConfigDirs();
 /* Return $XDG_DATA_HOME or $HOME/.local/share. */
 Path getDataDir();
 
+/* Return the path of the current executable. */
+std::optional<Path> getSelfExe();
+
+/* Return $XDG_STATE_HOME or $HOME/.local/state. */
+Path getStateDir();
+
+/* Create the Nix state directory and return the path to it. */
+Path createNixStateDir();
+
 /* Create a directory and all its parents, if necessary.  Returns the
    list of created directories, in order of creation. */
 Paths createDirs(const Path & path);
+inline Paths createDirs(PathView path)
+{
+    return createDirs(Path(path));
+}
 
 /* Create a symlink. */
 void createSymlink(const Path & target, const Path & link,
@@ -151,6 +179,17 @@ void createSymlink(const Path & target, const Path & link,
 /* Atomically create or replace a symlink. */
 void replaceSymlink(const Path & target, const Path & link,
     std::optional<time_t> mtime = {});
+
+void renameFile(const Path & src, const Path & dst);
+
+/**
+ * Similar to 'renameFile', but fallback to a copy+remove if `src` and `dst`
+ * are on a different filesystem.
+ *
+ * Beware that this might not be atomic because of the copy that happens behind
+ * the scenes
+ */
+void moveFile(const Path & src, const Path & dst);
 
 
 /* Wrappers arount read()/write() that read/write exactly the
@@ -162,10 +201,13 @@ MakeError(EndOfFile, Error);
 
 
 /* Read a file descriptor until EOF occurs. */
-string drainFD(int fd, bool block = true, const size_t reserveSize=0);
+std::string drainFD(int fd, bool block = true, const size_t reserveSize=0);
 
 void drainFD(int fd, Sink & sink, bool block = true);
 
+/* If cgroups are active, attempt to calculate the number of CPUs available.
+   If cgroups are unavailable or if cpu.max is set to "max", return 0. */
+unsigned int getMaxCPU();
 
 /* Automatic cleanup of resources. */
 
@@ -182,6 +224,7 @@ public:
     void cancel();
     void reset(const Path & p, bool recursive = true);
     operator Path() const { return path; }
+    operator PathView() const { return path; }
 };
 
 
@@ -200,6 +243,7 @@ public:
     explicit operator bool() const;
     int release();
     void close();
+    void fsync();
 };
 
 
@@ -259,10 +303,11 @@ void killUser(uid_t uid);
    pid to the caller. */
 struct ProcessOptions
 {
-    string errorPrefix = "error: ";
+    std::string errorPrefix = "";
     bool dieWithParent = true;
     bool runExitHandlers = false;
-    bool allowVfork = true;
+    bool allowVfork = false;
+    int cloneFlags = 0; // use clone() with the specified flags (Linux only)
 };
 
 pid_t startProcess(std::function<void()> fun, const ProcessOptions & options = ProcessOptions());
@@ -270,7 +315,7 @@ pid_t startProcess(std::function<void()> fun, const ProcessOptions & options = P
 
 /* Run a program and return its stdout in a string (i.e., like the
    shell backtick operator). */
-string runProgram(Path program, bool searchPath = false,
+std::string runProgram(Path program, bool searchPath = false,
     const Strings & args = Strings(),
     const std::optional<std::string> & input = {});
 
@@ -299,8 +344,21 @@ void setStackSize(size_t stackSize);
 
 
 /* Restore the original inherited Unix process context (such as signal
-   masks, stack size, CPU affinity). */
-void restoreProcessContext();
+   masks, stack size). */
+void restoreProcessContext(bool restoreMounts = true);
+
+/* Save the current mount namespace. Ignored if called more than
+   once. */
+void saveMountNamespace();
+
+/* Restore the mount namespace saved by saveMountNamespace(). Ignored
+   if saveMountNamespace() was never called. */
+void restoreMountNamespace();
+
+/* Cause this thread to not share any FS attributes with the main
+   thread, because this causes setns() in restoreMountNamespace() to
+   fail. */
+void unshareFilesystem();
 
 
 class ExecError : public Error
@@ -321,7 +379,7 @@ std::vector<char *> stringsToCharPtrs(const Strings & ss);
 
 /* Close all file descriptors except those listed in the given set.
    Good practice in child processes. */
-void closeMostFDs(const set<int> & exceptions);
+void closeMostFDs(const std::set<int> & exceptions);
 
 /* Set the close-on-exec flag for the given file descriptor. */
 void closeOnExec(int fd);
@@ -329,7 +387,7 @@ void closeOnExec(int fd);
 
 /* User interruption. */
 
-extern bool _isInterrupted;
+extern std::atomic<bool> _isInterrupted;
 
 extern thread_local std::function<bool()> interruptCheck;
 
@@ -350,20 +408,32 @@ MakeError(FormatError, Error);
 
 
 /* String tokenizer. */
-template<class C> C tokenizeString(std::string_view s, const string & separators = " \t\n\r");
+template<class C> C tokenizeString(std::string_view s, std::string_view separators = " \t\n\r");
 
 
 /* Concatenate the given strings with a separator between the
    elements. */
 template<class C>
-string concatStringsSep(const string & sep, const C & ss)
+std::string concatStringsSep(const std::string_view sep, const C & ss)
 {
-    string s;
+    size_t size = 0;
+    // need a cast to string_view since this is also called with Symbols
+    for (const auto & s : ss) size += sep.size() + std::string_view(s).size();
+    std::string s;
+    s.reserve(size);
     for (auto & i : ss) {
         if (s.size() != 0) s += sep;
         s += i;
     }
     return s;
+}
+
+template<class ... Parts>
+auto concatStrings(Parts && ... parts)
+    -> std::enable_if_t<(... && std::is_convertible_v<Parts, std::string_view>), std::string>
+{
+    std::string_view views[sizeof...(parts)] = { parts... };
+    return concatStringsSep({}, views);
 }
 
 
@@ -379,45 +449,47 @@ template<class C> Strings quoteStrings(const C & c)
 
 /* Remove trailing whitespace from a string. FIXME: return
    std::string_view. */
-string chomp(std::string_view s);
+std::string chomp(std::string_view s);
 
 
 /* Remove whitespace from the start and end of a string. */
-string trim(const string & s, const string & whitespace = " \n\r\t");
+std::string trim(std::string_view s, std::string_view whitespace = " \n\r\t");
 
 
 /* Replace all occurrences of a string inside another string. */
-string replaceStrings(std::string_view s,
-    const std::string & from, const std::string & to);
+std::string replaceStrings(
+    std::string s,
+    std::string_view from,
+    std::string_view to);
 
 
-std::string rewriteStrings(const std::string & s, const StringMap & rewrites);
+std::string rewriteStrings(std::string s, const StringMap & rewrites);
 
 
 /* Convert the exit status of a child as returned by wait() into an
    error string. */
-string statusToString(int status);
+std::string statusToString(int status);
 
 bool statusOk(int status);
 
 
 /* Parse a string into an integer. */
 template<class N>
-std::optional<N> string2Int(const std::string & s)
+std::optional<N> string2Int(const std::string_view s)
 {
     if (s.substr(0, 1) == "-" && !std::numeric_limits<N>::is_signed)
         return std::nullopt;
-    std::istringstream str(s);
-    N n;
-    str >> n;
-    if (str && str.get() == EOF) return n;
-    return std::nullopt;
+    try {
+        return boost::lexical_cast<N>(s.data(), s.size());
+    } catch (const boost::bad_lexical_cast &) {
+        return std::nullopt;
+    }
 }
 
 /* Like string2Int(), but support an optional suffix 'K', 'M', 'G' or
    'T' denoting a binary unit prefix. */
 template<class N>
-N string2IntWithUnitPrefix(std::string s)
+N string2IntWithUnitPrefix(std::string_view s)
 {
     N multiplier = 1;
     if (!s.empty()) {
@@ -428,7 +500,7 @@ N string2IntWithUnitPrefix(std::string s)
             else if (u == 'G') multiplier = 1ULL << 30;
             else if (u == 'T') multiplier = 1ULL << 40;
             else throw UsageError("invalid unit specifier '%1%'", u);
-            s.resize(s.size() - 1);
+            s.remove_suffix(1);
         }
     }
     if (auto n = string2Int<N>(s))
@@ -438,13 +510,25 @@ N string2IntWithUnitPrefix(std::string s)
 
 /* Parse a string into a float. */
 template<class N>
-std::optional<N> string2Float(const string & s)
+std::optional<N> string2Float(const std::string_view s)
 {
-    std::istringstream str(s);
-    N n;
-    str >> n;
-    if (str && str.get() == EOF) return n;
-    return std::nullopt;
+    try {
+        return boost::lexical_cast<N>(s.data(), s.size());
+    } catch (const boost::bad_lexical_cast &) {
+        return std::nullopt;
+    }
+}
+
+
+/* Convert a little-endian integer to host order. */
+template<typename T>
+T readLittleEndian(unsigned char * p)
+{
+    T x = 0;
+    for (size_t i = 0; i < sizeof(x); ++i, ++p) {
+        x |= ((T) *p) << (i * 8);
+    }
+    return x;
 }
 
 
@@ -461,12 +545,12 @@ std::string toLower(const std::string & s);
 
 
 /* Escape a string as a shell word. */
-std::string shellEscape(const std::string & s);
+std::string shellEscape(const std::string_view s);
 
 
 /* Exception handling in destructors: print an error message, then
    ignore the exception. */
-void ignoreException();
+void ignoreException(Verbosity lvl = lvlError);
 
 
 
@@ -491,8 +575,8 @@ std::string filterANSIEscapes(const std::string & s,
 
 
 /* Base64 encoding/decoding. */
-string base64Encode(std::string_view s);
-string base64Decode(std::string_view s);
+std::string base64Encode(std::string_view s);
+std::string base64Decode(std::string_view s);
 
 
 /* Remove common leading whitespace from the lines in the string
@@ -501,13 +585,60 @@ string base64Decode(std::string_view s);
 std::string stripIndentation(std::string_view s);
 
 
+/* Get the prefix of 's' up to and excluding the next line break (LF
+   optionally preceded by CR), and the remainder following the line
+   break. */
+std::pair<std::string_view, std::string_view> getLine(std::string_view s);
+
+
 /* Get a value for the specified key from an associate container. */
 template <class T>
-std::optional<typename T::mapped_type> get(const T & map, const typename T::key_type & key)
+const typename T::mapped_type * get(const T & map, const typename T::key_type & key)
 {
     auto i = map.find(key);
-    if (i == map.end()) return {};
-    return std::optional<typename T::mapped_type>(i->second);
+    if (i == map.end()) return nullptr;
+    return &i->second;
+}
+
+template <class T>
+typename T::mapped_type * get(T & map, const typename T::key_type & key)
+{
+    auto i = map.find(key);
+    if (i == map.end()) return nullptr;
+    return &i->second;
+}
+
+/* Get a value for the specified key from an associate container, or a default value if the key isn't present. */
+template <class T>
+const typename T::mapped_type & getOr(T & map,
+    const typename T::key_type & key,
+    const typename T::mapped_type & defaultValue)
+{
+    auto i = map.find(key);
+    if (i == map.end()) return defaultValue;
+    return i->second;
+}
+
+/* Remove and return the first item from a container. */
+template <class T>
+std::optional<typename T::value_type> remove_begin(T & c)
+{
+    auto i = c.begin();
+    if (i == c.end()) return {};
+    auto v = std::move(*i);
+    c.erase(i);
+    return v;
+}
+
+
+/* Remove and return the first item from a container. */
+template <class T>
+std::optional<typename T::value_type> pop(T & c)
+{
+    if (c.empty()) return {};
+    auto v = std::move(c.front());
+    c.pop();
+    return v;
 }
 
 
@@ -571,8 +702,17 @@ extern PathFilter defaultPathFilter;
 /* Common initialisation performed in child processes. */
 void commonChildInit(Pipe & logPipe);
 
+/* Create a Unix domain socket. */
+AutoCloseFD createUnixDomainSocket();
+
 /* Create a Unix domain socket in listen mode. */
 AutoCloseFD createUnixDomainSocket(const Path & path, mode_t mode);
+
+/* Bind a Unix domain socket to a path. */
+void bind(int fd, const std::string & path);
+
+/* Connect to a Unix domain socket. */
+void connect(int fd, const std::string & path);
 
 
 // A Rust/Python-like enumerate() iterator adapter.
@@ -609,5 +749,29 @@ template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 std::string showBytes(uint64_t bytes);
 
+
+/* Provide an addition operator between strings and string_views
+   inexplicably omitted from the standard library. */
+inline std::string operator + (const std::string & s1, std::string_view s2)
+{
+    auto s = s1;
+    s.append(s2);
+    return s;
+}
+
+inline std::string operator + (std::string && s, std::string_view s2)
+{
+    s.append(s2);
+    return std::move(s);
+}
+
+inline std::string operator + (std::string_view s1, const char * s2)
+{
+    std::string s;
+    s.reserve(s1.size() + strlen(s2));
+    s.append(s1);
+    s.append(s2);
+    return s;
+}
 
 }

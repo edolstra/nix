@@ -1,12 +1,17 @@
 #pragma once
 
-#include <variant>
-
 #include "path.hh"
 #include "derived-path.hh"
 
 namespace nix {
 
+/* This is a deprecated old type just for use by the old CLI, and older
+   versions of the RPC protocols. In new code don't use it; you want
+   `DerivedPath` instead.
+
+   `DerivedPath` is better because it handles more cases, and does so more
+   explicitly without devious punning tricks.
+*/
 struct StorePathWithOutputs
 {
     StorePath path;

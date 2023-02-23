@@ -3,6 +3,7 @@
 #include "types.hh"
 #include "config.hh"
 #include "util.hh"
+#include "experimental-features.hh"
 
 #include <map>
 #include <limits>
@@ -20,7 +21,7 @@ struct MaxBuildJobsSetting : public BaseSetting<unsigned int>
         const std::string & name,
         const std::string & description,
         const std::set<std::string> & aliases = {})
-        : BaseSetting<unsigned int>(def, name, description, aliases)
+        : BaseSetting<unsigned int>(def, true, name, description, aliases)
     {
         options->addSetting(this);
     }
@@ -37,7 +38,7 @@ struct PluginFilesSetting : public BaseSetting<Paths>
         const std::string & name,
         const std::string & description,
         const std::set<std::string> & aliases = {})
-        : BaseSetting<Paths>(def, name, description, aliases)
+        : BaseSetting<Paths>(def, true, name, description, aliases)
     {
         options->addSetting(this);
     }
@@ -45,14 +46,13 @@ struct PluginFilesSetting : public BaseSetting<Paths>
     void set(const std::string & str, bool append = false) override;
 };
 
-class MissingExperimentalFeature: public Error
-{
-public:
-    std::string missingFeature;
-
-    MissingExperimentalFeature(std::string feature);
-    virtual const char* sname() const override { return "MissingExperimentalFeature"; }
-};
+const uint32_t maxIdsPerBuild =
+    #if __linux__
+    1 << 16
+    #else
+    1
+    #endif
+    ;
 
 class Settings : public Config {
 
@@ -87,9 +87,6 @@ public:
     /* A list of user configuration files to load. */
     std::vector<Path> nixUserConfFiles;
 
-    /* The directory where internal helper programs are stored. */
-    Path nixLibexecDir;
-
     /* The directory where the main programs are stored. */
     Path nixBinDir;
 
@@ -121,7 +118,7 @@ public:
     bool verboseBuild = true;
 
     Setting<size_t> logLines{this, 10, "log-lines",
-        "If `verbose-build` is false, the number of lines of the tail of "
+        "The number of lines of the tail of "
         "the log to show if a build fails."};
 
     MaxBuildJobsSetting maxBuildJobs{
@@ -138,7 +135,9 @@ public:
         {"build-max-jobs"}};
 
     Setting<unsigned int> buildCores{
-        this, getDefaultCores(), "cores",
+        this,
+        getDefaultCores(),
+        "cores",
         R"(
           Sets the value of the `NIX_BUILD_CORES` environment variable in the
           invocation of builders. Builders can use this variable at their
@@ -149,7 +148,7 @@ public:
           command line switch and defaults to `1`. The value `0` means that
           the builder should use all available CPU cores in the system.
         )",
-        {"build-cores"}};
+        {"build-cores"}, false};
 
     /* Read-only mode.  Don't copy stuff to the store, don't change
        the database. */
@@ -201,7 +200,7 @@ public:
         )",
         {"build-timeout"}};
 
-    PathSetting buildHook{this, true, nixLibexecDir + "/nix/build-remote", "build-hook",
+    PathSetting buildHook{this, true, "", "build-hook",
         "The path of the helper program that executes builds to remote machines."};
 
     Setting<std::string> builders{
@@ -280,9 +279,70 @@ public:
           If the build users group is empty, builds will be performed under
           the uid of the Nix process (that is, the uid of the caller if
           `NIX_REMOTE` is empty, the uid under which the Nix daemon runs if
-          `NIX_REMOTE` is `daemon`). Obviously, this should not be used in
-          multi-user settings with untrusted users.
+          `NIX_REMOTE` is `daemon`). Obviously, this should not be used
+          with a nix daemon accessible to untrusted clients.
+
+          Defaults to `nixbld` when running as root, *empty* otherwise.
+        )",
+        {}, false};
+
+    Setting<bool> autoAllocateUids{this, false, "auto-allocate-uids",
+        R"(
+          Whether to select UIDs for builds automatically, instead of using the
+          users in `build-users-group`.
+
+          UIDs are allocated starting at 872415232 (0x34000000) on Linux and 56930 on macOS.
+
+          > **Warning**
+          > This is an experimental feature.
+
+          To enable it, add the following to [`nix.conf`](#):
+
+          ```
+          extra-experimental-features = auto-allocate-uids
+          auto-allocate-uids = true
+          ```
         )"};
+
+    Setting<uint32_t> startId{this,
+        #if __linux__
+        0x34000000,
+        #else
+        56930,
+        #endif
+        "start-id",
+        "The first UID and GID to use for dynamic ID allocation."};
+
+    Setting<uint32_t> uidCount{this,
+        #if __linux__
+        maxIdsPerBuild * 128,
+        #else
+        128,
+        #endif
+        "id-count",
+        "The number of UIDs/GIDs to use for dynamic ID allocation."};
+
+    #if __linux__
+    Setting<bool> useCgroups{
+        this, false, "use-cgroups",
+        R"(
+          Whether to execute builds inside cgroups.
+          This is only supported on Linux.
+
+          Cgroups are required and enabled automatically for derivations
+          that require the `uid-range` system feature.
+
+          > **Warning**
+          > This is an experimental feature.
+
+          To enable it, add the following to [`nix.conf`](#):
+
+          ```
+          extra-experimental-features = cgroups
+          use-cgroups = true
+          ```
+        )"};
+    #endif
 
     Setting<bool> impersonateLinux26{this, false, "impersonate-linux-26",
         "Whether to impersonate a Linux 2.6 machine on newer kernels.",
@@ -315,11 +375,6 @@ public:
           killed. A value of `0` (the default) means that there is no limit.
         )",
         {"build-max-log-size"}};
-
-    /* When buildRepeat > 0 and verboseBuild == true, whether to print
-       repeated builds (i.e. builds other than the first one) to
-       stderr. Hack to prevent Hydra logs from being polluted. */
-    bool printRepeatedBuilds = true;
 
     Setting<unsigned int> pollInterval{this, 5, "build-poll-interval",
         "How often (in seconds) to poll for locks."};
@@ -436,6 +491,9 @@ public:
           for example, `/dev/nvidiactl?` specifies that `/dev/nvidiactl` will
           only be mounted in the sandbox if it exists in the host filesystem.
 
+          If the source is in the Nix store, then its closure will be added to
+          the sandbox as well.
+
           Depending on how Nix was built, the default value for this option
           may be empty or provide `/bin/sh` as a bind-mount of `bash`.
         )",
@@ -443,19 +501,6 @@ public:
 
     Setting<bool> sandboxFallback{this, true, "sandbox-fallback",
         "Whether to disable sandboxing when the kernel doesn't allow it."};
-
-    Setting<size_t> buildRepeat{
-        this, 0, "repeat",
-        R"(
-          How many times to repeat builds to check whether they are
-          deterministic. The default value is 0. If the value is non-zero,
-          every build is repeated the specified number of times. If the
-          contents of any of the runs differs from the previous ones and
-          `enforce-determinism` is true, the build is rejected and the
-          resulting store paths are not registered as “valid” in Nix’s
-          database.
-        )",
-        {"build-repeat"}};
 
 #if __linux__
     Setting<std::string> sandboxShmSize{
@@ -520,20 +565,20 @@ public:
           configuration file, and cannot be passed at the command line.
         )"};
 
-    Setting<bool> enforceDeterminism{
-        this, true, "enforce-determinism",
-        "Whether to fail if repeated builds produce different output. See `repeat`."};
-
     Setting<Strings> trustedPublicKeys{
         this,
         {"cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="},
         "trusted-public-keys",
         R"(
-          A whitespace-separated list of public keys. When paths are copied
-          from another Nix store (such as a binary cache), they must be
-          signed with one of these keys. For example:
-          `cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-          hydra.nixos.org-1:CNHJZBh9K4tP3EKF6FkkgeVYsS3ohTl+oS0Qa8bezVs=`.
+          A whitespace-separated list of public keys.
+
+          At least one of the following condition must be met
+          for Nix to accept copying a store object from another
+          Nix store (such as a substituter):
+
+          - the store object has been signed using a key in the trusted keys list
+          - the [`require-sigs`](#conf-require-sigs) option has been set to `false`
+          - the store object is [output-addressed](@docroot@/glossary.md#gloss-output-addressed-store-object)
         )",
         {"binary-cache-public-keys"}};
 
@@ -569,9 +614,15 @@ public:
         R"(
           If set to `true` (the default), any non-content-addressed path added
           or copied to the Nix store (e.g. when substituting from a binary
-          cache) must have a valid signature, that is, be signed using one of
-          the keys listed in `trusted-public-keys` or `secret-key-files`. Set
-          to `false` to disable signature checking.
+          cache) must have a signature by a trusted key. A trusted key is one
+          listed in `trusted-public-keys`, or a public key counterpart to a
+          private key stored in a file listed in `secret-key-files`.
+
+          Set to `false` to disable signature checking and trust all
+          non-content-addressed paths unconditionally.
+
+          (Content-addressed paths are inherently trustworthy and thus
+          unaffected by this configuration option.)
         )"};
 
     Setting<StringSet> extraPlatforms{
@@ -591,10 +642,11 @@ public:
           platform and generate incompatible code, so you may wish to
           cross-check the results of using this option against proper
           natively-built versions of your derivations.
-        )"};
+        )", {}, false};
 
     Setting<StringSet> systemFeatures{
-        this, getDefaultSystemFeatures(),
+        this,
+        getDefaultSystemFeatures(),
         "system-features",
         R"(
           A set of system “features” supported by this machine, e.g. `kvm`.
@@ -610,7 +662,7 @@ public:
           This setting by default includes `kvm` if `/dev/kvm` is accessible,
           and the pseudo-features `nixos-test`, `benchmark` and `big-parallel`
           that are used in Nixpkgs to route builds to specific machines.
-        )"};
+        )", {}, false};
 
     Setting<Strings> substituters{
         this,
@@ -621,6 +673,15 @@ public:
           are tried based on their Priority value, which each substituter can set
           independently. Lower value means higher priority.
           The default is `https://cache.nixos.org`, with a Priority of 40.
+
+          At least one of the following conditions must be met for Nix to use
+          a substituter:
+
+          - the substituter is in the [`trusted-substituters`](#conf-trusted-substituters) list
+          - the user calling Nix is in the [`trusted-users`](#conf-trusted-users) list
+
+          In addition, each store path should be trusted as described
+          in [`trusted-public-keys`](#conf-trusted-public-keys)
         )",
         {"binary-caches"}};
 
@@ -634,24 +695,6 @@ public:
           URLs listed in `substituters` and `trusted-substituters`.
         )",
         {"trusted-binary-caches"}};
-
-    Setting<Strings> trustedUsers{
-        this, {"root"}, "trusted-users",
-        R"(
-          A list of names of users (separated by whitespace) that have
-          additional rights when connecting to the Nix daemon, such as the
-          ability to specify additional binary caches, or to import unsigned
-          NARs. You can also specify groups by prefixing them with `@`; for
-          instance, `@wheel` means all users in the `wheel` group. The default
-          is `root`.
-
-          > **Warning**
-          >
-          > Adding a user to `trusted-users` is essentially equivalent to
-          > giving that user root access to the system. For example, the user
-          > can set `sandbox-paths` and thereby obtain read access to
-          > directories that are otherwise inacessible to them.
-        )"};
 
     Setting<unsigned int> ttlNegativeNarInfoCache{
         this, 3600, "narinfo-cache-negative-ttl",
@@ -673,18 +716,6 @@ public:
           collection, in which case having a more frequent cache invalidation
           would prevent trying to pull the path again and failing with a hash
           mismatch if the build isn't reproducible.
-        )"};
-
-    /* ?Who we trust to use the daemon in safe ways */
-    Setting<Strings> allowedUsers{
-        this, {"*"}, "allowed-users",
-        R"(
-          A list of names of users (separated by whitespace) that are allowed
-          to connect to the Nix daemon. As with the `trusted-users` option,
-          you can specify groups by prefixing them with `@`. Also, you can
-          allow all users by specifying `*`. The default is `*`.
-
-          Note that trusted users are always allowed to connect.
         )"};
 
     Setting<bool> printMissing{this, true, "print-missing",
@@ -754,6 +785,13 @@ public:
               /nix/store/xfghy8ixrhz3kyy6p724iv3cxji088dx-bash-4.4-p23`.
         )"};
 
+    Setting<unsigned int> downloadSpeed {
+        this, 0, "download-speed",
+        R"(
+          Specify the maximum transfer rate in kilobytes per second you want
+          Nix to use for downloads.
+        )"};
+
     Setting<std::string> netrcFile{
         this, fmt("%s/%s", nixConfDir, "netrc"), "netrc-file",
         R"(
@@ -804,6 +842,15 @@ public:
           enabling this option. This is impure and usually undesirable, but
           may be useful in certain scenarios (e.g. to spin up containers or
           set up userspace network interfaces in tests).
+        )"};
+
+    Setting<StringSet> ignoredAcls{
+        this, {"security.selinux", "system.nfs4_acl", "security.csm"}, "ignored-acls",
+        R"(
+          A list of ACLs that should be ignored, normally Nix attempts to
+          remove all ACLs from files and directories in the Nix store, but
+          some ACLs like `security.selinux` or `system.nfs4_acl` can't be
+          removed even by root. Therefore it's best to just ignore them.
         )"};
 #endif
 
@@ -876,73 +923,15 @@ public:
           are loaded as plugins (non-recursively).
         )"};
 
-    Setting<StringMap> accessTokens{this, {}, "access-tokens",
-        R"(
-          Access tokens used to access protected GitHub, GitLab, or
-          other locations requiring token-based authentication.
-
-          Access tokens are specified as a string made up of
-          space-separated `host=token` values.  The specific token
-          used is selected by matching the `host` portion against the
-          "host" specification of the input. The actual use of the
-          `token` value is determined by the type of resource being
-          accessed:
-
-          * Github: the token value is the OAUTH-TOKEN string obtained
-            as the Personal Access Token from the Github server (see
-            https://docs.github.com/en/developers/apps/authorizing-oath-apps).
-
-          * Gitlab: the token value is either the OAuth2 token or the
-            Personal Access Token (these are different types tokens
-            for gitlab, see
-            https://docs.gitlab.com/12.10/ee/api/README.html#authentication).
-            The `token` value should be `type:tokenstring` where
-            `type` is either `OAuth2` or `PAT` to indicate which type
-            of token is being specified.
-
-          Example `~/.config/nix/nix.conf`:
-
-          ```
-          access-tokens = github.com=23ac...b289 gitlab.mycompany.com=PAT:A123Bp_Cd..EfG gitlab.com=OAuth2:1jklw3jk
-          ```
-
-          Example `~/code/flake.nix`:
-
-          ```nix
-          input.foo = {
-            type = "gitlab";
-            host = "gitlab.mycompany.com";
-            owner = "mycompany";
-            repo = "pro";
-          };
-          ```
-
-          This example specifies three tokens, one each for accessing
-          github.com, gitlab.mycompany.com, and sourceforge.net.
-
-          The `input.foo` uses the "gitlab" fetcher, which might
-          requires specifying the token type along with the token
-          value.
-          )"};
-
-    Setting<Strings> experimentalFeatures{this, {}, "experimental-features",
+    Setting<std::set<ExperimentalFeature>> experimentalFeatures{this, {}, "experimental-features",
         "Experimental Nix features to enable."};
 
-    bool isExperimentalFeatureEnabled(const std::string & name);
+    bool isExperimentalFeatureEnabled(const ExperimentalFeature &);
 
-    void requireExperimentalFeature(const std::string & name);
-
-    Setting<bool> allowDirty{this, true, "allow-dirty",
-        "Whether to allow dirty Git/Mercurial trees."};
-
-    Setting<bool> warnDirty{this, true, "warn-dirty",
-        "Whether to warn about dirty Git/Mercurial trees."};
+    void requireExperimentalFeature(const ExperimentalFeature &);
 
     Setting<size_t> narBufferSize{this, 32 * 1024 * 1024, "nar-buffer-size",
         "Maximum size of NARs before spilling them to disk."};
-
-    Setting<std::string> flakeRegistry{this, "https://github.com/NixOS/flake-registry/raw/master/flake-registry.json", "flake-registry",
-        "Path or URI of the global flake registry."};
 
     Setting<bool> allowSymlinkedStore{
         this, false, "allow-symlinked-store",
@@ -957,8 +946,26 @@ public:
           can enable this setting if you are sure you're not going to do that.
         )"};
 
-    Setting<bool> useRegistries{this, true, "use-registries",
-        "Whether to use flake registries to resolve flake references."};
+    Setting<bool> useXDGBaseDirectories{
+        this, false, "use-xdg-base-directories",
+        R"(
+          If set to `true`, Nix will conform to the [XDG Base Directory Specification] for files in `$HOME`.
+          The environment variables used to implement this are documented in the [Environment Variables section](@docroot@/installation/env-variables.md).
+
+          [XDG Base Directory Specification]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+
+          > **Warning**
+          > This changes the location of some well-known symlinks that Nix creates, which might break tools that rely on the old, non-XDG-conformant locations.
+
+          In particular, the following locations change:
+
+          | Old               | New                            |
+          |-------------------|--------------------------------|
+          | `~/.nix-profile`  | `$XDG_STATE_HOME/nix/profile`  |
+          | `~/.nix-defexpr`  | `$XDG_STATE_HOME/nix/defexpr`  |
+          | `~/.nix-channels` | `$XDG_STATE_HOME/nix/channels` |
+        )"
+    };
 };
 
 
@@ -974,6 +981,14 @@ void loadConfFile();
 // Used by the Settings constructor
 std::vector<Path> getUserConfigFiles();
 
-extern const string nixVersion;
+extern const std::string nixVersion;
+
+/* NB: This is not sufficient. You need to call initNix() */
+void initLibStore();
+
+/* It's important to initialize before doing _anything_, which is why we
+   call upon the programmer to handle this correctly. However, we only add
+   this in a key locations, so as not to litter the code. */
+void assertLibStoreInitialized();
 
 }

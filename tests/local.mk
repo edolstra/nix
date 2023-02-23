@@ -1,69 +1,137 @@
 nix_tests = \
-  hash.sh lang.sh add.sh simple.sh dependencies.sh \
-  config.sh \
-  gc.sh \
+  flakes/flakes.sh \
+  flakes/run.sh \
+  flakes/mercurial.sh \
+  flakes/circular.sh \
+  flakes/init.sh \
+  flakes/follow-paths.sh \
+  flakes/bundle.sh \
+  flakes/check.sh \
+  flakes/unlocked-override.sh \
+  flakes/absolute-paths.sh \
+  flakes/build-paths.sh \
   ca/gc.sh \
-  gc-concurrent.sh \
+  gc.sh \
+  remote-store.sh \
+  lang.sh \
+  fetchMercurial.sh \
   gc-auto.sh \
-  referrers.sh user-envs.sh logging.sh nix-build.sh misc.sh fixed.sh \
-  gc-runtime.sh check-refs.sh filter-source.sh \
-  local-store.sh remote-store.sh export.sh export-graph.sh \
-  db-migration.sh \
-  timeout.sh secure-drv-outputs.sh nix-channel.sh \
-  multiple-outputs.sh import-derivation.sh fetchurl.sh optimise-store.sh \
+  user-envs.sh \
+  user-envs-migration.sh \
   binary-cache.sh \
+  multiple-outputs.sh \
+  ca/build.sh \
+  ca/new-build-cmd.sh \
+  nix-build.sh \
+  gc-concurrent.sh \
+  repair.sh \
+  fixed.sh \
+  export-graph.sh \
+  timeout.sh \
+  fetchGitRefs.sh \
+  gc-runtime.sh \
+  tarball.sh \
+  fetchGit.sh \
+  fetchurl.sh \
+  fetchPath.sh \
+  fetchTree-file.sh \
+  simple.sh \
+  referrers.sh \
+  optimise-store.sh \
   substitute-with-invalid-ca.sh \
-  binary-cache-build-remote.sh \
-  nix-profile.sh repair.sh dump-db.sh case-hack.sh \
-  check-reqs.sh pass-as-file.sh tarball.sh restricted.sh \
-  placeholders.sh nix-shell.sh \
-  linux-sandbox.sh \
-  build-dry.sh \
+  ca/concurrent-builds.sh \
+  signing.sh \
+  ca/build-with-garbage-path.sh \
+  hash.sh \
+  gc-non-blocking.sh \
+  check.sh \
+  ca/substitute.sh \
+  nix-shell.sh \
+  ca/signatures.sh \
+  ca/nix-shell.sh \
+  ca/nix-copy.sh \
+  check-refs.sh \
   build-remote-input-addressed.sh \
+  secure-drv-outputs.sh \
+  restricted.sh \
+  fetchGitSubmodules.sh \
+  flakes/search-root.sh \
+  ca/duplicate-realisation-in-closure.sh \
+  readfile-context.sh \
+  nix-channel.sh \
+  recursive.sh \
+  dependencies.sh \
+  check-reqs.sh \
   build-remote-content-addressed-fixed.sh \
   build-remote-content-addressed-floating.sh \
-  ssh-relay.sh \
   nar-access.sh \
+  pure-eval.sh \
+  eval.sh \
+  ca/post-hook.sh \
+  repl.sh \
+  ca/repl.sh \
+  ca/recursive.sh \
+  binary-cache-build-remote.sh \
+  search.sh \
+  logging.sh \
+  export.sh \
+  config.sh \
+  add.sh \
+  local-store.sh \
+  filter-source.sh \
+  misc.sh \
+  dump-db.sh \
+  linux-sandbox.sh \
+  build-dry.sh \
   structured-attrs.sh \
-  fetchGit.sh \
-  fetchGitRefs.sh \
-  fetchGitSubmodules.sh \
-  fetchMercurial.sh \
-  signing.sh \
   shell.sh \
   brotli.sh \
   zstd.sh \
-  pure-eval.sh \
-  check.sh \
-  plugins.sh \
-  search.sh \
+  compression-levels.sh \
   nix-copy-ssh.sh \
   post-hook.sh \
-  ca/post-hook.sh \
   function-trace.sh \
-  recursive.sh \
-  describe-stores.sh \
-  flakes.sh \
+  flakes/config.sh \
+  fmt.sh \
+  eval-store.sh \
+  why-depends.sh \
+  ca/why-depends.sh \
+  import-derivation.sh \
+  ca/import-derivation.sh \
+  nix_path.sh \
+  case-hack.sh \
+  placeholders.sh \
+  ssh-relay.sh \
+  plugins.sh \
   build.sh \
-  compute-levels.sh \
-  repl.sh \
-  ca/build.sh \
-  ca/build-with-garbage-path.sh \
-  ca/duplicate-realisation-in-closure.sh \
-  ca/substitute.sh \
-  ca/signatures.sh \
-  ca/nix-shell.sh \
+  build-delete.sh \
+  output-normalization.sh \
   ca/nix-run.sh \
-  ca/recursive.sh \
-  ca/concurrent-builds.sh \
-  ca/nix-copy.sh \
-  eval-store.sh
-  # parallel.sh
+  selfref-gc.sh ca/selfref-gc.sh \
+  db-migration.sh \
+  bash-profile.sh \
+  pass-as-file.sh \
+  describe-stores.sh \
+  nix-profile.sh \
+  suggestions.sh \
+  store-ping.sh \
+  fetchClosure.sh \
+  completions.sh \
+  flakes/show.sh \
+  impure-derivations.sh \
+  path-from-hash-part.sh \
+  toString-path.sh
+
+ifeq ($(HAVE_LIBCPUID), 1)
+	nix_tests += compute-levels.sh
+endif
 
 install-tests += $(foreach x, $(nix_tests), tests/$(x))
 
-tests-environment = NIX_REMOTE= $(bash) -e
-
 clean-files += $(d)/common.sh $(d)/config.nix $(d)/ca/config.nix
 
-test-deps += tests/common.sh tests/config.nix tests/ca/config.nix tests/plugins/libplugintest.$(SO_EXT)
+test-deps += tests/common.sh tests/config.nix tests/ca/config.nix
+
+ifeq ($(BUILD_SHARED_LIBS), 1)
+  test-deps += tests/plugins/libplugintest.$(SO_EXT)
+endif

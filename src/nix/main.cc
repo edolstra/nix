@@ -53,13 +53,11 @@ static bool haveInternet()
 }
 
 std::string programPath;
-char * * savedArgv;
 
 struct HelpRequested { };
 
 struct NixArgs : virtual MultiCommand, virtual MixCommonArgs
 {
-    bool printBuildLogs = false;
     bool useNet = true;
     bool refresh = false;
     bool showVersion = false;
@@ -75,6 +73,7 @@ struct NixArgs : virtual MultiCommand, virtual MixCommonArgs
         addFlag({
             .longName = "help",
             .description = "Show usage information.",
+            .category = miscCategory,
             .handler = {[&]() { throw HelpRequested(); }},
         });
 
@@ -83,12 +82,13 @@ struct NixArgs : virtual MultiCommand, virtual MixCommonArgs
             .shortName = 'L',
             .description = "Print full build logs on standard error.",
             .category = loggingCategory,
-            .handler = {[&]() {setLogFormat(LogFormat::barWithLogs); }},
+            .handler = {[&]() { logger->setPrintBuildLogs(true); }},
         });
 
         addFlag({
             .longName = "version",
             .description = "Show version information.",
+            .category = miscCategory,
             .handler = {[&]() { showVersion = true; }},
         });
 
@@ -96,12 +96,14 @@ struct NixArgs : virtual MultiCommand, virtual MixCommonArgs
             .longName = "offline",
             .aliases = {"no-net"}, // FIXME: remove
             .description = "Disable substituters and consider all previously downloaded files up-to-date.",
+            .category = miscCategory,
             .handler = {[&]() { useNet = false; }},
         });
 
         addFlag({
             .longName = "refresh",
             .description = "Consider all previously downloaded files out-of-date.",
+            .category = miscCategory,
             .handler = {[&]() { refresh = true; }},
         });
     }
@@ -118,7 +120,7 @@ struct NixArgs : virtual MultiCommand, virtual MixCommonArgs
         {"hash-path", {"hash", "path"}},
         {"ls-nar", {"nar", "ls"}},
         {"ls-store", {"store", "ls"}},
-        {"make-content-addressable", {"store", "make-content-addressable"}},
+        {"make-content-addressable", {"store", "make-content-addressed"}},
         {"optimise-store", {"store", "optimise"}},
         {"ping-store", {"store", "ping"}},
         {"sign-paths", {"store", "sign"}},
@@ -187,17 +189,17 @@ static void showHelp(std::vector<std::string> subcommand, MultiCommand & topleve
             , "/"),
         *vUtils);
 
-    auto vJson = state.allocValue();
-    mkString(*vJson, toplevel.toJSON().dump());
+    auto attrs = state.buildBindings(16);
+    attrs.alloc("toplevel").mkString(toplevel.toJSON().dump());
 
     auto vRes = state.allocValue();
-    state.callFunction(*vGenerateManpage, *vJson, *vRes, noPos);
+    state.callFunction(*vGenerateManpage, state.allocValue()->mkAttrs(attrs), *vRes, noPos);
 
     auto attr = vRes->attrs->get(state.symbols.create(mdName + ".md"));
     if (!attr)
         throw UsageError("Nix has no subcommand '%s'", concatStringsSep("", subcommand));
 
-    auto markdown = state.forceString(*attr->value);
+    auto markdown = state.forceString(*attr->value, noPos, "while evaluating the lowdown help text");
 
     RunPager pager;
     std::cout << renderMarkdownToTerminal(markdown) << "\n";
@@ -252,21 +254,40 @@ void mainWrapped(int argc, char * * argv)
     initNix();
     initGC();
 
+    #if __linux__
+    if (getuid() == 0) {
+        try {
+            saveMountNamespace();
+            if (unshare(CLONE_NEWNS) == -1)
+                throw SysError("setting up a private mount namespace");
+        } catch (Error & e) { }
+    }
+    #endif
+
+    Finally f([] { logger->stop(); });
+
     programPath = argv[0];
     auto programName = std::string(baseNameOf(programPath));
+
+    if (argc > 1 && std::string_view(argv[1]) == "__build-remote") {
+        programName = "build-remote";
+        argv++; argc--;
+    }
 
     {
         auto legacy = (*RegisterLegacyCommand::commands)[programName];
         if (legacy) return legacy(argc, argv);
     }
 
-    verbosity = lvlNotice;
-    settings.verboseBuild = false;
     evalSettings.pureEval = true;
 
     setLogFormat("bar");
-
-    Finally f([] { logger->stop(); });
+    settings.verboseBuild = false;
+    if (isatty(STDERR_FILENO)) {
+        verbosity = lvlNotice;
+    } else {
+        verbosity = lvlInfo;
+    }
 
     NixArgs args;
 
@@ -276,6 +297,7 @@ void mainWrapped(int argc, char * * argv)
     }
 
     if (argc == 2 && std::string(argv[1]) == "__dump-builtins") {
+        settings.experimentalFeatures = {Xp::Flakes, Xp::FetchClosure};
         evalSettings.pureEval = false;
         EvalState state({}, openStore("dummy://"));
         auto res = nlohmann::json::object();
@@ -288,7 +310,7 @@ void mainWrapped(int argc, char * * argv)
             b["arity"] = primOp->arity;
             b["args"] = primOp->args;
             b["doc"] = trim(stripIndentation(primOp->doc));
-            res[(std::string) builtin.name] = std::move(b);
+            res[state.symbols[builtin.name]] = std::move(b);
         }
         std::cout << res.dump() << "\n";
         return;
@@ -297,9 +319,16 @@ void mainWrapped(int argc, char * * argv)
     Finally printCompletions([&]()
     {
         if (completions) {
-            std::cout << (pathCompletions ? "filenames\n" : "no-filenames\n");
+            switch (completionType) {
+            case ctNormal:
+                std::cout << "normal\n"; break;
+            case ctFilenames:
+                std::cout << "filenames\n"; break;
+            case ctAttrs:
+                std::cout << "attrs\n"; break;
+            }
             for (auto & s : *completions)
-                std::cout << s.completion << "\t" << s.description << "\n";
+                std::cout << s.completion << "\t" << trim(s.description) << "\n";
         }
     });
 
@@ -321,7 +350,10 @@ void mainWrapped(int argc, char * * argv)
         if (!completions) throw;
     }
 
-    if (completions) return;
+    if (completions) {
+        args.completionHook();
+        return;
+    }
 
     if (args.showVersion) {
         printVersion(programName);
@@ -334,7 +366,7 @@ void mainWrapped(int argc, char * * argv)
     if (args.command->first != "repl"
         && args.command->first != "doctor"
         && args.command->first != "upgrade-nix")
-        settings.requireExperimentalFeature("nix-command");
+        settings.requireExperimentalFeature(Xp::NixCommand);
 
     if (args.useNet && !haveInternet()) {
         warn("you don't have Internet access; disabling some network-dependent features");
@@ -359,6 +391,9 @@ void mainWrapped(int argc, char * * argv)
         settings.ttlPositiveNarInfoCache = 0;
     }
 
+    if (args.command->second->forceImpureByDefault() && !evalSettings.pureEval.overridden) {
+        evalSettings.pureEval = false;
+    }
     args.command->second->prepare();
     args.command->second->run();
 }

@@ -2,6 +2,7 @@
 #include "common-args.hh"
 #include "shared.hh"
 #include "store-api.hh"
+#include "log-store.hh"
 #include "progress-bar.hh"
 
 using namespace nix;
@@ -34,17 +35,24 @@ struct CmdLog : InstallableCommand
 
         RunPager pager;
         for (auto & sub : subs) {
+            auto * logSubP = dynamic_cast<LogStore *>(&*sub);
+            if (!logSubP) {
+                printInfo("Skipped '%s' which does not support retrieving build logs", sub->getUri());
+                continue;
+            }
+            auto & logSub = *logSubP;
+
             auto log = std::visit(overloaded {
-                [&](DerivedPath::Opaque bo) {
-                    return sub->getBuildLog(bo.path);
+                [&](const DerivedPath::Opaque & bo) {
+                    return logSub.getBuildLog(bo.path);
                 },
-                [&](DerivedPath::Built bfd) {
-                    return sub->getBuildLog(bfd.drvPath);
+                [&](const DerivedPath::Built & bfd) {
+                    return logSub.getBuildLog(bfd.drvPath);
                 },
-            }, b.raw());
+            }, b.path.raw());
             if (!log) continue;
             stopProgressBar();
-            printInfo("got build log for '%s' from '%s'", installable->what(), sub->getUri());
+            printInfo("got build log for '%s' from '%s'", installable->what(), logSub.getUri());
             std::cout << *log;
             return;
         }

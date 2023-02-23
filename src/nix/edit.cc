@@ -3,6 +3,7 @@
 #include "eval.hh"
 #include "attr-path.hh"
 #include "progress-bar.hh"
+#include "editor-for.hh"
 
 #include <unistd.h>
 
@@ -28,19 +29,19 @@ struct CmdEdit : InstallableCommand
     {
         auto state = getEvalState();
 
-        auto [v, pos] = installable->toValue(*state);
+        const auto [file, line] = [&] {
+            auto [v, pos] = installable->toValue(*state);
 
-        try {
-            pos = findPackageFilename(*state, *v, installable->what());
-        } catch (NoPositionInfo &) {
-        }
-
-        if (pos == noPos)
-            throw Error("cannot find position information for '%s", installable->what());
+            try {
+                return findPackageFilename(*state, *v, installable->what());
+            } catch (NoPositionInfo &) {
+                throw Error("cannot find position information for '%s", installable->what());
+            }
+        }();
 
         stopProgressBar();
 
-        auto args = editorFor(pos);
+        auto args = editorFor(file, line);
 
         restoreProcessContext();
 

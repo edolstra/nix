@@ -40,12 +40,12 @@ case "$(uname -s).$(uname -m)" in
         path=@tarballPath_aarch64-linux@
         system=aarch64-linux
         ;;
-    Linux.armv6l_linux)
+    Linux.armv6l)
         hash=@tarballHash_armv6l-linux@
         path=@tarballPath_armv6l-linux@
         system=armv6l-linux
         ;;
-    Linux.armv7l_linux)
+    Linux.armv7l)
         hash=@tarballHash_armv7l-linux@
         path=@tarballPath_armv7l-linux@
         system=armv7l-linux
@@ -81,10 +81,10 @@ if [ "$(uname -s)" != "Darwin" ]; then
     require_util xz "unpack the binary tarball"
 fi
 
-if command -v wget > /dev/null 2>&1; then
+if command -v curl > /dev/null 2>&1; then
+    fetch() { curl --fail -L "$1" -o "$2"; }
+elif command -v wget > /dev/null 2>&1; then
     fetch() { wget "$1" -O "$2"; }
-elif command -v curl > /dev/null 2>&1; then
-    fetch() { curl -L "$1" -o "$2"; }
 else
     oops "you don't have wget or curl installed, which I need to download the binary tarball"
 fi

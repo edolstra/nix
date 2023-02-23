@@ -4,6 +4,8 @@ if [[ -z "$COMMON_SH_SOURCED" ]]; then
 
 COMMON_SH_SOURCED=1
 
+export PS4='+(${BASH_SOURCE[0]}:$LINENO) '
+
 export TEST_ROOT=$(realpath ${TMPDIR:-/tmp}/nix-test)/${TEST_NAME:-default}
 export NIX_STORE_DIR
 if ! NIX_STORE_DIR=$(readlink -f $TEST_ROOT/store 2> /dev/null); then
@@ -27,6 +29,8 @@ export NIX_REMOTE=$NIX_REMOTE_
 unset NIX_PATH
 export TEST_HOME=$TEST_ROOT/test-home
 export HOME=$TEST_HOME
+unset XDG_STATE_HOME
+unset XDG_DATA_HOME
 unset XDG_CONFIG_HOME
 unset XDG_CONFIG_DIRS
 unset XDG_CACHE_HOME
@@ -36,8 +40,9 @@ export PATH=@bindir@:$PATH
 if [[ -n "${NIX_CLIENT_PACKAGE:-}" ]]; then
   export PATH="$NIX_CLIENT_PACKAGE/bin":$PATH
 fi
+DAEMON_PATH="$PATH"
 if [[ -n "${NIX_DAEMON_PACKAGE:-}" ]]; then
-  export NIX_DAEMON_COMMAND="$NIX_DAEMON_PACKAGE/bin/nix-daemon"
+  DAEMON_PATH="${NIX_DAEMON_PACKAGE}/bin:$DAEMON_PATH"
 fi
 coreutils=@coreutils@
 
@@ -49,6 +54,8 @@ export busybox="@sandbox_shell@"
 export version=@PACKAGE_VERSION@
 export system=@system@
 
+export BUILD_SHARED_LIBS=@BUILD_SHARED_LIBS@
+
 export IMPURE_VAR1=foo
 export IMPURE_VAR2=bar
 
@@ -59,8 +66,8 @@ readLink() {
 }
 
 clearProfiles() {
-    profiles="$NIX_STATE_DIR"/profiles
-    rm -rf $profiles
+    profiles="$HOME"/.local/state/nix/profiles
+    rm -rf "$profiles"
 }
 
 clearStore() {
@@ -86,36 +93,41 @@ startDaemon() {
     if [[ "$NIX_REMOTE" == daemon ]]; then
       return
     fi
-    # Start the daemon, wait for the socket to appear.  !!!
-    # ‘nix-daemon’ should have an option to fork into the background.
+    # Start the daemon, wait for the socket to appear.
     rm -f $NIX_DAEMON_SOCKET_PATH
-    ${NIX_DAEMON_COMMAND:-nix daemon} &
-    for ((i = 0; i < 30; i++)); do
-        if [[ -S $NIX_DAEMON_SOCKET_PATH ]]; then break; fi
-        sleep 1
-    done
+    PATH=$DAEMON_PATH nix-daemon&
     pidDaemon=$!
+    for ((i = 0; i < 300; i++)); do
+        if [[ -S $NIX_DAEMON_SOCKET_PATH ]]; then
+          DAEMON_STARTED=1
+          break;
+        fi
+        sleep 0.1
+    done
+    if [[ -z ${DAEMON_STARTED+x} ]]; then
+      fail "Didn’t manage to start the daemon"
+    fi
     trap "killDaemon" EXIT
     export NIX_REMOTE=daemon
 }
 
 killDaemon() {
     kill $pidDaemon
-    for i in {0.10}; do
-        kill -0 $pidDaemon || break
-        sleep 1
+    for i in {0..100}; do
+        kill -0 $pidDaemon 2> /dev/null || break
+        sleep 0.1
     done
-    kill -9 $pidDaemon || true
+    kill -9 $pidDaemon 2> /dev/null || true
     wait $pidDaemon || true
     trap "" EXIT
 }
 
 restartDaemon() {
-  [[ -z "${pidDaemon:-}" ]] && return 0
+    [[ -z "${pidDaemon:-}" ]] && return 0
 
-  killDaemon
-  unset NIX_REMOTE
-  startDaemon
+    killDaemon
+    unset NIX_REMOTE
+    startDaemon
 }
 
 if [[ $(uname) == Linux ]] && [[ -L /proc/self/ns/user ]] && unshare --user true; then
@@ -126,7 +138,7 @@ isDaemonNewer () {
   [[ -n "${NIX_DAEMON_PACKAGE:-}" ]] || return 0
   local requiredVersion="$1"
   local daemonVersion=$($NIX_DAEMON_PACKAGE/bin/nix-daemon --version | cut -d' ' -f3)
-  return [[ $(nix eval --expr "builtins.compareVersions ''$daemonVersion'' ''2.4''") -ge 0 ]]
+  [[ $(nix eval --expr "builtins.compareVersions ''$daemonVersion'' ''$requiredVersion''") -ge 0 ]]
 }
 
 requireDaemonNewerThan () {
@@ -151,11 +163,12 @@ expect() {
     local expected res
     expected="$1"
     shift
-    set +e
-    "$@"
-    res="$?"
-    set -e
-    [[ $res -eq $expected ]]
+    "$@" || res="$?"
+    if [[ $res -ne $expected ]]; then
+        echo "Expected '$expected' but got '$res' while running '$*'"
+        return 1
+    fi
+    return 0
 }
 
 needLocalStore() {
@@ -166,8 +179,13 @@ needLocalStore() {
 }
 
 # Just to make it easy to find which tests should be fixed
-buggyNeedLocalStore () {
+buggyNeedLocalStore() {
   needLocalStore
+}
+
+enableFeatures() {
+    local features="$1"
+    sed -i 's/experimental-features .*/& '"$features"'/' "$NIX_CONF_DIR"/nix.conf
 }
 
 set -x
@@ -175,5 +193,16 @@ set -x
 if [[ -n "${NIX_DAEMON_PACKAGE:-}" ]]; then
     startDaemon
 fi
+
+onError() {
+    set +x
+    echo "$0: test failed at:" >&2
+    for ((i = 1; i < ${#BASH_SOURCE[@]}; i++)); do
+        if [[ -z ${BASH_SOURCE[i]} ]]; then break; fi
+        echo "  ${FUNCNAME[i]} in ${BASH_SOURCE[i]}:${BASH_LINENO[i-1]}" >&2
+    done
+}
+
+trap onError ERR
 
 fi # COMMON_SH_SOURCED

@@ -48,24 +48,9 @@ FdSink::~FdSink()
 }
 
 
-size_t threshold = 256 * 1024 * 1024;
-
-static void warnLargeDump()
-{
-    warn("dumping very large path (> 256 MiB); this may run out of memory");
-}
-
-
 void FdSink::write(std::string_view data)
 {
     written += data.size();
-    static bool warned = false;
-    if (warn && !warned) {
-        if (written > threshold) {
-            warnLargeDump();
-            warned = true;
-        }
-    }
     try {
         writeFull(fd, data);
     } catch (SysError & e) {
@@ -110,7 +95,7 @@ std::string Source::drain()
 {
     StringSink s;
     drainInto(s);
-    return *s.s;
+    return std::move(s.s);
 }
 
 
@@ -325,7 +310,7 @@ void writeString(std::string_view data, Sink & sink)
 }
 
 
-Sink & operator << (Sink & sink, const string & s)
+Sink & operator << (Sink & sink, std::string_view s)
 {
     writeString(s, sink);
     return sink;
@@ -353,11 +338,11 @@ Sink & operator << (Sink & sink, const StringSet & s)
 
 Sink & operator << (Sink & sink, const Error & ex)
 {
-    auto info = ex.info();
+    auto & info = ex.info();
     sink
         << "Error"
         << info.level
-        << info.name
+        << "Error" // removed
         << info.msg.str()
         << 0 // FIXME: info.errPos
         << info.traces.size();
@@ -391,7 +376,7 @@ size_t readString(char * buf, size_t max, Source & source)
 }
 
 
-string readString(Source & source, size_t max)
+std::string readString(Source & source, size_t max)
 {
     auto len = readNum<size_t>(source);
     if (len > max) throw SerialisationError("string is too long");
@@ -401,7 +386,7 @@ string readString(Source & source, size_t max)
     return res;
 }
 
-Source & operator >> (Source & in, string & s)
+Source & operator >> (Source & in, std::string & s)
 {
     s = readString(in);
     return in;
@@ -426,11 +411,10 @@ Error readError(Source & source)
     auto type = readString(source);
     assert(type == "Error");
     auto level = (Verbosity) readInt(source);
-    auto name = readString(source);
+    auto name = readString(source); // removed
     auto msg = readString(source);
     ErrorInfo info {
         .level = level,
-        .name = name,
         .msg = hintformat(std::move(format("%s") % msg)),
     };
     auto havePos = readNum<size_t>(source);
@@ -449,12 +433,7 @@ Error readError(Source & source)
 
 void StringSink::operator () (std::string_view data)
 {
-    static bool warned = false;
-    if (!warned && s->size() > threshold) {
-        warnLargeDump();
-        warned = true;
-    }
-    s->append(data);
+    s.append(data);
 }
 
 size_t ChainSource::read(char * data, size_t len)

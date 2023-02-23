@@ -23,6 +23,12 @@ R""(
   Hi everybody!
   ```
 
+* Run multiple commands in a shell environment:
+
+  ```console
+  # nix shell nixpkgs#gnumake -c sh -c "cd src && make"
+  ```
+
 * Run GNU Hello in a chroot store:
 
   ```console
@@ -41,8 +47,8 @@ R""(
 
 # Description
 
-`nix shell` runs a command in an environment in which the `$PATH`
-variable provides the specified *installables*. If not command is
-specified, it starts the default shell of your user account.
+`nix shell` runs a command in an environment in which the `$PATH` variable
+provides the specified *installables*. If no command is specified, it starts the
+default shell of your user account specified by `$SHELL`.
 
 )""

@@ -106,7 +106,7 @@ void printClosureDiff(
 
 using namespace nix;
 
-struct CmdDiffClosures : SourceExprCommand
+struct CmdDiffClosures : SourceExprCommand, MixOperateOnOptions
 {
     std::string _before, _after;
 
@@ -131,9 +131,9 @@ struct CmdDiffClosures : SourceExprCommand
     void run(ref<Store> store) override
     {
         auto before = parseInstallable(store, _before);
-        auto beforePath = toStorePath(getEvalStore(), store, Realise::Outputs, operateOn, before);
+        auto beforePath = Installable::toStorePath(getEvalStore(), store, Realise::Outputs, operateOn, before);
         auto after = parseInstallable(store, _after);
-        auto afterPath = toStorePath(getEvalStore(), store, Realise::Outputs, operateOn, after);
+        auto afterPath = Installable::toStorePath(getEvalStore(), store, Realise::Outputs, operateOn, after);
         printClosureDiff(store, beforePath, afterPath, "");
     }
 };

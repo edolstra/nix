@@ -2,10 +2,12 @@
 
 #include "util.hh"
 #include "path.hh"
-#include "path-with-outputs.hh"
+#include "outputs-spec.hh"
 #include "derived-path.hh"
 #include "eval.hh"
+#include "store-api.hh"
 #include "flake/flake.hh"
+#include "build-result.hh"
 
 #include <optional>
 
@@ -18,7 +20,7 @@ namespace eval_cache { class EvalCache; class AttrCursor; }
 
 struct App
 {
-    std::vector<StorePathWithOutputs> context;
+    std::vector<DerivedPath> context;
     Path program;
     // FIXME: add args, sandbox settings, metadata, ...
 };
@@ -29,19 +31,67 @@ struct UnresolvedApp
     App resolve(ref<Store> evalStore, ref<Store> store);
 };
 
+enum class Realise {
+    /* Build the derivation. Postcondition: the
+       derivation outputs exist. */
+    Outputs,
+    /* Don't build the derivation. Postcondition: the store derivation
+       exists. */
+    Derivation,
+    /* Evaluate in dry-run mode. Postcondition: nothing. */
+    // FIXME: currently unused, but could be revived if we can
+    // evaluate derivations in-memory.
+    Nothing
+};
+
+/* How to handle derivations in commands that operate on store paths. */
+enum class OperateOn {
+    /* Operate on the output path. */
+    Output,
+    /* Operate on the .drv path. */
+    Derivation
+};
+
+struct ExtraPathInfo
+{
+    std::optional<NixInt> priority;
+    std::optional<FlakeRef> originalRef;
+    std::optional<FlakeRef> resolvedRef;
+    std::optional<std::string> attrPath;
+    // FIXME: merge with DerivedPath's 'outputs' field?
+    std::optional<ExtendedOutputsSpec> extendedOutputsSpec;
+};
+
+/* A derived path with any additional info that commands might
+   need from the derivation. */
+struct DerivedPathWithInfo
+{
+    DerivedPath path;
+    ExtraPathInfo info;
+};
+
+struct BuiltPathWithResult
+{
+    BuiltPath path;
+    ExtraPathInfo info;
+    std::optional<BuildResult> result;
+};
+
+typedef std::vector<DerivedPathWithInfo> DerivedPathsWithInfo;
+
 struct Installable
 {
     virtual ~Installable() { }
 
-    virtual std::string what() = 0;
+    virtual std::string what() const = 0;
 
-    virtual DerivedPaths toDerivedPaths() = 0;
+    virtual DerivedPathsWithInfo toDerivedPaths() = 0;
 
-    DerivedPath toDerivedPath();
+    DerivedPathWithInfo toDerivedPath();
 
     UnresolvedApp toApp(EvalState & state);
 
-    virtual std::pair<Value *, Pos> toValue(EvalState & state)
+    virtual std::pair<Value *, PosIdx> toValue(EvalState & state)
     {
         throw Error("argument '%s' cannot be evaluated", what());
     }
@@ -53,74 +103,62 @@ struct Installable
         return {};
     }
 
-    virtual std::vector<std::pair<std::shared_ptr<eval_cache::AttrCursor>, std::string>>
+    /* Get a cursor to each value this Installable could refer to. However
+       if none exists, throw exception instead of returning empty vector. */
+    virtual std::vector<ref<eval_cache::AttrCursor>>
     getCursors(EvalState & state);
 
-    std::pair<std::shared_ptr<eval_cache::AttrCursor>, std::string>
+    /* Get the first and most preferred cursor this Installable could refer
+       to, or throw an exception if none exists. */
+    virtual ref<eval_cache::AttrCursor>
     getCursor(EvalState & state);
 
     virtual FlakeRef nixpkgsFlakeRef() const
     {
         return FlakeRef::fromAttrs({{"type","indirect"}, {"id", "nixpkgs"}});
     }
+
+    static std::vector<BuiltPathWithResult> build(
+        ref<Store> evalStore,
+        ref<Store> store,
+        Realise mode,
+        const std::vector<std::shared_ptr<Installable>> & installables,
+        BuildMode bMode = bmNormal);
+
+    static std::vector<std::pair<std::shared_ptr<Installable>, BuiltPathWithResult>> build2(
+        ref<Store> evalStore,
+        ref<Store> store,
+        Realise mode,
+        const std::vector<std::shared_ptr<Installable>> & installables,
+        BuildMode bMode = bmNormal);
+
+    static std::set<StorePath> toStorePaths(
+        ref<Store> evalStore,
+        ref<Store> store,
+        Realise mode,
+        OperateOn operateOn,
+        const std::vector<std::shared_ptr<Installable>> & installables);
+
+    static StorePath toStorePath(
+        ref<Store> evalStore,
+        ref<Store> store,
+        Realise mode,
+        OperateOn operateOn,
+        std::shared_ptr<Installable> installable);
+
+    static std::set<StorePath> toDerivations(
+        ref<Store> store,
+        const std::vector<std::shared_ptr<Installable>> & installables,
+        bool useDeriver = false);
+
+    static BuiltPaths toBuiltPaths(
+        ref<Store> evalStore,
+        ref<Store> store,
+        Realise mode,
+        OperateOn operateOn,
+        const std::vector<std::shared_ptr<Installable>> & installables);
 };
 
-struct InstallableValue : Installable
-{
-    ref<EvalState> state;
-
-    InstallableValue(ref<EvalState> state) : state(state) {}
-
-    struct DerivationInfo
-    {
-        StorePath drvPath;
-        std::optional<StorePath> outPath;
-        std::string outputName;
-    };
-
-    virtual std::vector<DerivationInfo> toDerivations() = 0;
-
-    DerivedPaths toDerivedPaths() override;
-};
-
-struct InstallableFlake : InstallableValue
-{
-    FlakeRef flakeRef;
-    Strings attrPaths;
-    Strings prefixes;
-    const flake::LockFlags & lockFlags;
-    mutable std::shared_ptr<flake::LockedFlake> _lockedFlake;
-
-    InstallableFlake(
-        SourceExprCommand * cmd,
-        ref<EvalState> state,
-        FlakeRef && flakeRef,
-        Strings && attrPaths,
-        Strings && prefixes,
-        const flake::LockFlags & lockFlags);
-
-    std::string what() override { return flakeRef.to_string() + "#" + *attrPaths.begin(); }
-
-    std::vector<std::string> getActualAttrPaths();
-
-    Value * getFlakeOutputs(EvalState & state, const flake::LockedFlake & lockedFlake);
-
-    std::tuple<std::string, FlakeRef, DerivationInfo> toDerivation();
-
-    std::vector<DerivationInfo> toDerivations() override;
-
-    std::pair<Value *, Pos> toValue(EvalState & state) override;
-
-    std::vector<std::pair<std::shared_ptr<eval_cache::AttrCursor>, std::string>>
-    getCursors(EvalState & state) override;
-
-    std::shared_ptr<flake::LockedFlake> getLockedFlake() const;
-
-    FlakeRef nixpkgsFlakeRef() const override;
-};
-
-ref<eval_cache::EvalCache> openEvalCache(
-    EvalState & state,
-    std::shared_ptr<flake::LockedFlake> lockedFlake);
+typedef std::vector<std::shared_ptr<Installable>> Installables;
 
 }
