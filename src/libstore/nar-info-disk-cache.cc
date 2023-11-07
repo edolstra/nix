@@ -133,6 +133,7 @@ public:
                          (content is not null and timestamp > ?))
             )");
 
+        #if 0
         /* Periodically purge expired entries from the database. */
         retrySQLite<void>([&]() {
             auto now = time(0);
@@ -157,6 +158,7 @@ public:
                     .use()(now).exec();
             }
         });
+        #endif
     }
 
     Cache & getCache(State & state, const std::string & uri)
