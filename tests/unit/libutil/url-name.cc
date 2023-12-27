@@ -6,6 +6,9 @@ namespace nix {
 /* ----------- tests for url-name.hh --------------------------------------------------*/
 
     TEST(getNameFromURL, getsNameFromURL) {
+        ASSERT_EQ(getNameFromURL(parseURL("flake:nixpkgs#hello")), "hello");
+        ASSERT_EQ(getNameFromURL(parseURL("flake:nixpkgs#packages.x86_64-linux.hello")), "hello");
+
         ASSERT_EQ(getNameFromURL(parseURL("path:/home/user/project")), "project");
         ASSERT_EQ(getNameFromURL(parseURL("path:~/repos/nixpkgs#packages.x86_64-linux.hello")), "hello");
         ASSERT_EQ(getNameFromURL(parseURL("path:.#nonStandardAttr.mylaptop")), "nonStandardAttr.mylaptop");
@@ -63,5 +66,7 @@ namespace nix {
         ASSERT_EQ(getNameFromURL(parseURL("file:.#")), std::nullopt);
         ASSERT_EQ(getNameFromURL(parseURL("path:.#packages.x86_64-linux.default")), std::nullopt);
         ASSERT_EQ(getNameFromURL(parseURL("path:.#packages.x86_64-linux.default^*")), std::nullopt);
+        ASSERT_EQ(getNameFromURL(parseURL("flake:nixpkgs")), std::nullopt);
+        ASSERT_EQ(getNameFromURL(parseURL("flake:nixpkgs#")), std::nullopt);
     }
 }
