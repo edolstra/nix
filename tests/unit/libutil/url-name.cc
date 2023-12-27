@@ -8,11 +8,12 @@ namespace nix {
     TEST(getNameFromURL, getsNameFromURL) {
         ASSERT_EQ(getNameFromURL(parseURL("flake:nixpkgs#hello")), "hello");
         ASSERT_EQ(getNameFromURL(parseURL("flake:nixpkgs#packages.x86_64-linux.hello")), "hello");
+        ASSERT_EQ(getNameFromURL(parseURL("flake:nixpkgs#legacyPackages.x86_64-linux.hello")), "hello");
 
         ASSERT_EQ(getNameFromURL(parseURL("path:/home/user/project")), "project");
         ASSERT_EQ(getNameFromURL(parseURL("path:~/repos/nixpkgs#packages.x86_64-linux.hello")), "hello");
-        ASSERT_EQ(getNameFromURL(parseURL("path:.#nonStandardAttr.mylaptop")), "nonStandardAttr.mylaptop");
-        ASSERT_EQ(getNameFromURL(parseURL("path:./repos/myflake#nonStandardAttr.mylaptop")), "nonStandardAttr.mylaptop");
+        ASSERT_EQ(getNameFromURL(parseURL("path:.#nonStandardAttr.mylaptop")), "mylaptop");
+        ASSERT_EQ(getNameFromURL(parseURL("path:./repos/myflake#nonStandardAttr.mylaptop")), "mylaptop");
         ASSERT_EQ(getNameFromURL(parseURL("path:./nixpkgs#packages.x86_64-linux.complex^bin,man")), "complex");
         ASSERT_EQ(getNameFromURL(parseURL("path:./myproj#packages.x86_64-linux.default^*")), "myproj");
 
