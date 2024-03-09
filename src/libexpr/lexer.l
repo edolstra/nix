@@ -52,6 +52,7 @@ static void adjustLoc(YYLTYPE * loc, const char * s, size_t len)
                s++;
            }
            /* fall through */
+           BOOST_FALLTHROUGH;
        case '\n':
            ++loc->last_line;
            loc->last_column = 1;
