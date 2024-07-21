@@ -29,8 +29,12 @@ in
   nix-flake-tests = callPackage ../tests/unit/libflake/package.nix { };
 
   nix-main = callPackage ../src/libmain/package.nix { };
+  nix-main-c = callPackage ../src/libmain-c/package.nix { };
 
   nix-cmd = callPackage ../src/libcmd/package.nix { };
+
+  # Will replace `nix` once the old build system is gone.
+  nix-ng = callPackage ../src/nix/package.nix { };
 
   nix-internal-api-docs = callPackage ../src/internal-api-docs/package.nix { };
   nix-external-api-docs = callPackage ../src/external-api-docs/package.nix { };

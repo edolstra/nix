@@ -53,7 +53,9 @@ struct LockedNode : Node
         : lockedRef(lockedRef), originalRef(originalRef), isFlake(isFlake), parentPath(parentPath), patchFiles(std::move(patchFiles))
     { }
 
-    LockedNode(const nlohmann::json & json);
+    LockedNode(
+        const fetchers::Settings & fetchSettings,
+        const nlohmann::json & json);
 };
 
 struct LockFile
@@ -61,7 +63,9 @@ struct LockFile
     ref<Node> root = make_ref<Node>();
 
     LockFile() {};
-    LockFile(std::string_view contents, std::string_view path);
+    LockFile(
+        const fetchers::Settings & fetchSettings,
+        std::string_view contents, std::string_view path);
 
     typedef std::map<ref<const Node>, std::string> KeyMap;
 
@@ -76,9 +80,6 @@ struct LockFile
     std::optional<FlakeRef> isUnlocked() const;
 
     bool operator ==(const LockFile & other) const;
-    // Needed for old gcc versions that don't synthesize it (like gcc 8.2.2
-    // that is still the default on aarch64-linux)
-    bool operator !=(const LockFile & other) const;
 
     std::shared_ptr<Node> findInput(const InputPath & path);
 

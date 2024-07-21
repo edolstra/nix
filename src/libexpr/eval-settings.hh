@@ -3,6 +3,7 @@
 
 #include "config.hh"
 #include "source-path.hh"
+#include "ref.hh"
 
 namespace nix {
 
@@ -40,7 +41,7 @@ struct EvalSettings : Config
 
     bool & readOnlyMode;
 
-    Strings getDefaultNixPath() const;
+    static Strings getDefaultNixPath();
 
     static bool isPseudoUrl(std::string_view s);
 

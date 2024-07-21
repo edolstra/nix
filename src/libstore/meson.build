@@ -99,18 +99,14 @@ deps_public += nlohmann_json
 sqlite = dependency('sqlite3', 'sqlite', version : '>=3.6.19')
 deps_private += sqlite
 
+subdir('build-utils-meson/generate-header')
+
 generated_headers = []
 foreach header : [
   'schema.sql',
   'ca-specific-schema.sql',
 ]
-  generated_headers += custom_target(
-    command : [ 'bash', '-c', '{ echo \'R"__NIX_STR(\' && cat @INPUT@ && echo \')__NIX_STR"\'; } > "$1"', '_ignored_argv0', '@OUTPUT@' ],
-    input : header,
-    output : '@PLAINNAME@.gen.hh',
-    install : true,
-    install_dir : get_option('includedir') / 'nix',
-  )
+  generated_headers += gen_header.process(header)
 endforeach
 
 busybox = find_program(get_option('sandbox-shell'), required : false)
@@ -166,6 +162,7 @@ sources = files(
   'builtins/fetchurl.cc',
   'builtins/unpack-channel.cc',
   'common-protocol.cc',
+  'common-ssh-store-config.cc',
   'content-address.cc',
   'daemon.cc',
   'derivations.cc',
@@ -210,7 +207,6 @@ sources = files(
   'serve-protocol-connection.cc',
   'serve-protocol.cc',
   'sqlite.cc',
-  'ssh-store-config.cc',
   'ssh-store.cc',
   'ssh.cc',
   'store-api.cc',
@@ -237,6 +233,7 @@ headers = [config_h] + files(
   'builtins/buildenv.hh',
   'common-protocol-impl.hh',
   'common-protocol.hh',
+  'common-ssh-store-config.hh',
   'content-address.hh',
   'daemon.hh',
   'derivations.hh',
@@ -246,10 +243,12 @@ headers = [config_h] + files(
   'filetransfer.hh',
   'gc-store.hh',
   'globals.hh',
+  'http-binary-cache-store.hh',
   'indirect-root-store.hh',
   'keys.hh',
   'legacy-ssh-store.hh',
   'length-prefixed-protocol-helper.hh',
+  'local-binary-cache-store.hh',
   'local-fs-store.hh',
   'local-overlay-store.hh',
   'local-store.hh',
@@ -276,11 +275,11 @@ headers = [config_h] + files(
   'remote-store.hh',
   's3-binary-cache-store.hh',
   's3.hh',
+  'ssh-store.hh',
   'serve-protocol-connection.hh',
   'serve-protocol-impl.hh',
   'serve-protocol.hh',
   'sqlite.hh',
-  'ssh-store-config.hh',
   'ssh.hh',
   'store-api.hh',
   'store-cast.hh',
