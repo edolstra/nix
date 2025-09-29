@@ -312,6 +312,28 @@ void ExprPath::bindVars(EvalState & es, const std::shared_ptr<const StaticEnv> &
         es.exprEnvs.insert(std::make_pair(this, env));
 }
 
+template<Level L, Displacement D>
+static Value * getVar(Env * env)
+{
+    for (auto l = L; l; --l, env = env->up)
+        ;
+    return env->values[D];
+}
+
+#define MAKE_GETVAR_FOR(n) \
+    std::array<Value * (*)(Env * env), 16>{ getVar<n, 0>, getVar<n, 1>, getVar<n, 2>, getVar<n, 3>, getVar<n, 4>, getVar<n, 5>, getVar<n, 6>, getVar<n, 7>, getVar<n, 8>, getVar<n, 9>, getVar<n, 10>, getVar<n, 11>, getVar<n, 12>, getVar<n, 13>, getVar<n, 14>, getVar<n, 15>}
+
+static std::array<std::array<Value * (*)(Env * env), 16>, 8> getVars{
+    MAKE_GETVAR_FOR(0),
+    MAKE_GETVAR_FOR(1),
+    MAKE_GETVAR_FOR(2),
+    MAKE_GETVAR_FOR(3),
+    MAKE_GETVAR_FOR(4),
+    MAKE_GETVAR_FOR(5),
+    MAKE_GETVAR_FOR(6),
+    MAKE_GETVAR_FOR(7),
+};
+
 void ExprVar::bindVars(EvalState & es, const std::shared_ptr<const StaticEnv> & env)
 {
     if (es.debugRepl)
@@ -333,6 +355,8 @@ void ExprVar::bindVars(EvalState & es, const std::shared_ptr<const StaticEnv> & 
             if (i != curEnv->vars.end()) {
                 this->level = level;
                 displ = i->second;
+                if (level < 8 && displ < 16)
+                    getVar = getVars[level][displ];
                 return;
             }
         }

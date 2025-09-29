@@ -250,6 +250,8 @@ struct ExprVar : Expr
     Level level = 0;
     Displacement displ = 0;
 
+    Value * (*getVar)(Env * env) = nullptr;
+
     ExprVar(Symbol name)
         : name(name) {};
     ExprVar(const PosIdx & pos, Symbol name)

@@ -857,13 +857,21 @@ void Value::mkPath(const SourcePath & path)
     mkPath(&*path.accessor, makeImmutableString(path.path.abs()));
 }
 
+uint64_t nrVarLookups = 0;
+std::map<std::pair<int, int>, int> varLookups;
+
 inline Value * EvalState::lookupVar(Env * env, const ExprVar & var, bool noEval)
 {
     for (auto l = var.level; l; --l, env = env->up)
         ;
 
-    if (!var.fromWith)
+    if (!var.fromWith) {
+        #if 0
+        nrVarLookups++;
+        varLookups[std::pair(var.level, var.displ)]++;
+        #endif
         return env->values[var.displ];
+    }
 
     // This early exit defeats the `maybeThunk` optimization for variables from `with`,
     // The added complexity of handling this appears to be similarly in cost, or
@@ -1001,7 +1009,7 @@ Value * Expr::maybeThunk(EvalState & state, Env & env)
 
 Value * ExprVar::maybeThunk(EvalState & state, Env & env)
 {
-    Value * v = state.lookupVar(&env, *this, true);
+    auto v = getVar ? getVar(&env) : state.lookupVar(&env, *this, true);
     /* The value might not be initialised in the environment yet.
        In that case, ignore it. */
     if (v) {
@@ -1336,7 +1344,7 @@ Value * ExprList::maybeThunk(EvalState & state, Env & env)
 
 void ExprVar::eval(EvalState & state, Env & env, Value & v)
 {
-    Value * v2 = state.lookupVar(&env, *this, false);
+    auto v2 = getVar ? getVar(&env) : state.lookupVar(&env, *this, false);
     state.forceValue(*v2, pos);
     v = *v2;
 }
@@ -2987,6 +2995,8 @@ void EvalState::printStatistics()
     topObj["nrLookups"] = nrLookups.load();
     topObj["nrPrimOpCalls"] = nrPrimOpCalls.load();
     topObj["nrFunctionCalls"] = nrFunctionCalls.load();
+    topObj["nrVarLookups"] = nrVarLookups;
+    topObj["varLookups"] = varLookups;
 #if NIX_USE_BOEHMGC
     topObj["gc"] = {
         {"heapSize", heapSize},
