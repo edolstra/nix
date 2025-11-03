@@ -31,12 +31,12 @@ public:
      *
      * \todo use std::packaged_task?
      */
-    typedef std::function<void()> work_t;
+    typedef std::move_only_function<void()> work_t;
 
     /**
      * Enqueue a function to be executed by the thread pool.
      */
-    void enqueue(const work_t & t);
+    void enqueue(work_t t);
 
     /**
      * Execute work items until the queue is empty.
