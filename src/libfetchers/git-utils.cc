@@ -338,30 +338,40 @@ struct GitRepoImpl : GitRepo, std::enable_shared_from_this<GitRepoImpl>
         boost::concurrent_flat_set<git_oid, std::hash<git_oid>> done;
 
         auto startCommit = peelObject<Commit>(lookupObject(*this, hashToOID(rev)).get(), GIT_OBJECT_COMMIT);
-        done.insert(*git_commit_id(startCommit.get()));
+        auto startOid = *git_commit_id(startCommit.get());
+        done.insert(startOid);
+
+        Pool<GitRepoImpl> repoPool(std::numeric_limits<size_t>::max(), [this, useMempack(useMempack)]() -> ref<GitRepoImpl> {
+            return make_ref<GitRepoImpl>(path, false, bare, useMempack);
+        });
 
         ThreadPool pool;
 
-        auto process = [&done, &pool](this const auto & process, const Commit & commit) -> void
+        auto process = [&done, &pool, &repoPool](this const auto & process, const git_oid & oid) -> void
         {
-            for (size_t n = 0; n < git_commit_parentcount(commit.get()); ++n) {
-                Commit parent;
-                if (git_commit_parent(Setter(parent), commit.get(), n)) {
+            auto repo(repoPool.get());
+
+            auto _commit = lookupObject(*repo, oid, GIT_OBJECT_COMMIT);
+            auto commit = (const git_commit *) &*_commit;
+
+            for (size_t n = 0; n < git_commit_parentcount(commit); ++n) {
+                auto parentOid = git_commit_parent_id(commit, n);
+                if (!parentOid) {
                     throw Error(
                         "Failed to retrieve the parent of Git commit '%s': %s. "
                         "This may be due to an incomplete repository history. "
                         "To resolve this, either enable the shallow parameter in your flake URL (?shallow=1) "
                         "or add set the shallow parameter to true in builtins.fetchGit, "
                         "or fetch the complete history for this branch.",
-                        *git_commit_id(commit.get()),
+                        *git_commit_id(commit),
                         git_error_last()->message);
                 }
-                if (done.insert(*git_commit_id(parent.get())))
-                    pool.enqueue([&process, commit(std::move(parent))](){ process(commit); });
+                if (done.insert(*parentOid))
+                    pool.enqueue([&process, oid(*parentOid)](){ process(oid); });
             }
         };
 
-        pool.enqueue([&process, commit(std::move(startCommit))](){ process(commit); });
+        pool.enqueue([&process, startOid](){ process(startOid); });
 
         pool.process();
 
