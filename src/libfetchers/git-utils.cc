@@ -35,6 +35,7 @@
 #include <git2/tag.h>
 #include <git2/tree.h>
 
+#include <boost/unordered/concurrent_flat_set.hpp>
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
 #include <iostream>
@@ -334,30 +335,35 @@ struct GitRepoImpl : GitRepo, std::enable_shared_from_this<GitRepoImpl>
 
     uint64_t getRevCount(const Hash & rev) override
     {
-        boost::unordered_flat_set<git_oid, std::hash<git_oid>> done;
-        std::queue<Commit> todo;
+        boost::concurrent_flat_set<git_oid, std::hash<git_oid>> done;
 
-        todo.push(peelObject<Commit>(lookupObject(*this, hashToOID(rev)).get(), GIT_OBJECT_COMMIT));
+        auto startCommit = peelObject<Commit>(lookupObject(*this, hashToOID(rev)).get(), GIT_OBJECT_COMMIT);
+        done.insert(*git_commit_id(startCommit.get()));
 
-        while (auto commit = pop(todo)) {
-            if (!done.insert(*git_commit_id(commit->get())).second)
-                continue;
+        ThreadPool pool;
 
-            for (size_t n = 0; n < git_commit_parentcount(commit->get()); ++n) {
-                git_commit * parent;
-                if (git_commit_parent(&parent, commit->get(), n)) {
+        auto process = [&done, &pool](this const auto & process, const Commit & commit) -> void
+        {
+            for (size_t n = 0; n < git_commit_parentcount(commit.get()); ++n) {
+                Commit parent;
+                if (git_commit_parent(Setter(parent), commit.get(), n)) {
                     throw Error(
                         "Failed to retrieve the parent of Git commit '%s': %s. "
                         "This may be due to an incomplete repository history. "
                         "To resolve this, either enable the shallow parameter in your flake URL (?shallow=1) "
                         "or add set the shallow parameter to true in builtins.fetchGit, "
                         "or fetch the complete history for this branch.",
-                        *git_commit_id(commit->get()),
+                        *git_commit_id(commit.get()),
                         git_error_last()->message);
                 }
-                todo.push(Commit(parent));
+                if (done.insert(*git_commit_id(parent.get())))
+                    pool.enqueue([&process, commit(std::move(parent))](){ process(commit); });
             }
-        }
+        };
+
+        pool.enqueue([&process, commit(std::move(startCommit))](){ process(commit); });
+
+        pool.process();
 
         return done.size();
     }
