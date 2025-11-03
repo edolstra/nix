@@ -234,7 +234,7 @@ struct GitInputScheme : InputScheme
 
         Input input{settings};
         input.attrs = attrs;
-        input.attrs["url"] = fixGitURL(getStrAttr(attrs, "url")).to_string();
+        input.attrs.insert_or_assign("url", fixGitURL(getStrAttr(attrs, "url")).to_string());
         getShallowAttr(input);
         getSubmodulesAttr(input);
         getAllRefsAttr(input);

@@ -69,7 +69,7 @@ static void prim_parseFlakeRef(EvalState & state, const PosIdx pos, Value ** arg
                 [&vv](const std::string & value) { vv.mkString(value); },
                 [&vv](const uint64_t & value) { vv.mkInt(value); },
                 [&vv](const Explicit<bool> & value) { vv.mkBool(value.t); }},
-            value);
+            value());
     }
     v.mkAttrs(binds);
 }

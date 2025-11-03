@@ -125,7 +125,7 @@ MixEvalArgs::MixEvalArgs()
             auto to = parseFlakeRef(fetchSettings, _to, std::filesystem::current_path().string());
             fetchers::Attrs extraAttrs;
             if (to.subdir != "")
-                extraAttrs["dir"] = to.subdir;
+                extraAttrs.insert_or_assign("dir", to.subdir);
             fetchers::overrideRegistry(from.input, to.input, extraAttrs);
         }},
         .completer = {[&](AddCompletions & completions, size_t, std::string_view prefix) {

@@ -115,7 +115,7 @@ struct CmdRegistryAdd : MixEvalArgs, Command, RegistryCommand
         auto registry = getRegistry();
         fetchers::Attrs extraAttrs;
         if (toRef.subdir != "")
-            extraAttrs["dir"] = toRef.subdir;
+            extraAttrs.insert_or_assign("dir", toRef.subdir);
         registry->remove(fromRef.input);
         registry->add(fromRef.input, toRef.input, extraAttrs);
         registry->write(getRegistryPath());
@@ -195,7 +195,7 @@ struct CmdRegistryPin : RegistryCommand, EvalCommand
             warn("flake '%s' is not locked", resolved.to_string());
         fetchers::Attrs extraAttrs;
         if (ref.subdir != "")
-            extraAttrs["dir"] = ref.subdir;
+            extraAttrs.insert_or_assign("dir", ref.subdir);
         registry->add(ref.input, resolved, extraAttrs);
         registry->write(getRegistryPath());
     }

@@ -181,7 +181,7 @@ MixFlakeOptions::MixFlakeOptions()
                     fetchers::Attrs extraAttrs;
 
                     if (!input3->lockedRef.subdir.empty()) {
-                        extraAttrs["dir"] = input3->lockedRef.subdir;
+                        extraAttrs.insert_or_assign("dir", input3->lockedRef.subdir);
                     }
 
                     overrideRegistry(

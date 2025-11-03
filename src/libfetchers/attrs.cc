@@ -5,6 +5,19 @@
 
 namespace nix::fetchers {
 
+template<typename T>
+std::future<T> immediateFuture(T t)
+{
+    std::promise<Attr> p;
+    p.set_value(std::move(t));
+    return p.get_future();
+}
+
+LazyAttr::LazyAttr(Attr attr)
+    : attr(immediateFuture(std::move(attr)))
+{
+}
+
 Attrs jsonToAttrs(const nlohmann::json & json)
 {
     Attrs attrs;
@@ -27,11 +40,11 @@ nlohmann::json attrsToJSON(const Attrs & attrs)
 {
     nlohmann::json json;
     for (auto & attr : attrs) {
-        if (auto v = std::get_if<uint64_t>(&attr.second)) {
+        if (auto v = std::get_if<uint64_t>(&attr.second())) {
             json[attr.first] = *v;
-        } else if (auto v = std::get_if<std::string>(&attr.second)) {
+        } else if (auto v = std::get_if<std::string>(&attr.second())) {
             json[attr.first] = *v;
-        } else if (auto v = std::get_if<Explicit<bool>>(&attr.second)) {
+        } else if (auto v = std::get_if<Explicit<bool>>(&attr.second())) {
             json[attr.first] = v->t;
         } else
             unreachable();
@@ -44,7 +57,7 @@ std::optional<std::string> maybeGetStrAttr(const Attrs & attrs, const std::strin
     auto i = attrs.find(name);
     if (i == attrs.end())
         return {};
-    if (auto v = std::get_if<std::string>(&i->second))
+    if (auto v = std::get_if<std::string>(&i->second()))
         return *v;
     throw Error("input attribute '%s' is not a string %s", name, attrsToJSON(attrs).dump());
 }
@@ -62,7 +75,7 @@ std::optional<uint64_t> maybeGetIntAttr(const Attrs & attrs, const std::string &
     auto i = attrs.find(name);
     if (i == attrs.end())
         return {};
-    if (auto v = std::get_if<uint64_t>(&i->second))
+    if (auto v = std::get_if<uint64_t>(&i->second()))
         return *v;
     throw Error("input attribute '%s' is not an integer", name);
 }
@@ -80,7 +93,7 @@ std::optional<bool> maybeGetBoolAttr(const Attrs & attrs, const std::string & na
     auto i = attrs.find(name);
     if (i == attrs.end())
         return {};
-    if (auto v = std::get_if<Explicit<bool>>(&i->second))
+    if (auto v = std::get_if<Explicit<bool>>(&i->second()))
         return v->t;
     throw Error("input attribute '%s' is not a Boolean", name);
 }
@@ -97,11 +110,11 @@ StringMap attrsToQuery(const Attrs & attrs)
 {
     StringMap query;
     for (auto & attr : attrs) {
-        if (auto v = std::get_if<uint64_t>(&attr.second)) {
+        if (auto v = std::get_if<uint64_t>(&attr.second())) {
             query.insert_or_assign(attr.first, fmt("%d", *v));
-        } else if (auto v = std::get_if<std::string>(&attr.second)) {
+        } else if (auto v = std::get_if<std::string>(&attr.second())) {
             query.insert_or_assign(attr.first, *v);
-        } else if (auto v = std::get_if<Explicit<bool>>(&attr.second)) {
+        } else if (auto v = std::get_if<Explicit<bool>>(&attr.second())) {
             query.insert_or_assign(attr.first, v->t ? "1" : "0");
         } else
             unreachable();

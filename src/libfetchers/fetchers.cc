@@ -175,6 +175,7 @@ Attrs Input::toAttrs() const
     return attrs;
 }
 
+// FIXME: remove noexcept
 bool Input::operator==(const Input & other) const noexcept
 {
     return attrs == other.attrs;

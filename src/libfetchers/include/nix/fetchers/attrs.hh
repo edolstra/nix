@@ -8,18 +8,61 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <future>
 #include <optional>
 
 namespace nix::fetchers {
 
-typedef std::variant<std::string, uint64_t, Explicit<bool>> Attr;
+using Attr = std::variant<std::string, uint64_t, Explicit<bool>>;
+
+struct LazyAttr
+{
+    std::shared_future<Attr> attr;
+
+    LazyAttr(Attr attr);
+    LazyAttr(std::future<Attr> attr)
+        : attr(std::move(attr)) {};
+    LazyAttr(std::string s)
+        : LazyAttr(Attr{std::move(s)}) {};
+    LazyAttr(const char * s)
+        : LazyAttr(Attr{std::string(s)}) {};
+    LazyAttr(uint64_t n)
+        : LazyAttr(Attr{n}) {};
+    LazyAttr(Explicit<bool> b)
+        : LazyAttr(Attr{b}) {};
+
+    operator const Attr &() const
+    {
+        return attr.get();
+    }
+
+    const Attr & operator()() const
+    {
+        return attr.get();
+    }
+
+    bool operator==(const LazyAttr & other) const
+    {
+        return (*this)() == other();
+    }
+
+    bool operator!=(const LazyAttr & other) const
+    {
+        return (*this)() != other();
+    }
+
+    bool operator<(const LazyAttr & other) const
+    {
+        return (*this)() < other();
+    }
+};
 
 /**
  * An `Attrs` can be thought of a JSON object restricted or simplified
  * to be "flat", not containing any subcontainers (arrays or objects)
  * and also not containing any `null`s.
  */
-typedef std::map<std::string, Attr> Attrs;
+using Attrs = std::map<std::string, LazyAttr>;
 
 Attrs jsonToAttrs(const nlohmann::json & json);
 
